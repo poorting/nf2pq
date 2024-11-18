@@ -1,9 +1,9 @@
 use std::str::*;
-use std::net::{IpAddr, UdpSocket};
-use std::io::ErrorKind;
+use std::net::IpAddr;
+use tokio::net::UdpSocket;
 use anyhow::Error;
 use crossbeam::channel;
-use tracing::{instrument, info, debug, error};
+use tracing::{instrument, info, debug};
 
 use crate::flowprocessor::*;
 
@@ -14,8 +14,8 @@ pub struct FlowCollector {
     source_ip: String,      // IP Address of the flow source
     source_name: String,
     port: u16,              // port to listen on
-    rx      : channel::Receiver<String>,
-    fp_tx   : channel::Sender<FlowMessage>,
+    rx      : tokio::sync::mpsc::UnboundedReceiver<String>,
+    fp_tx   : tokio::sync::mpsc::UnboundedSender<FlowMessage>,
  }
 
 impl FlowCollector {
@@ -24,8 +24,8 @@ impl FlowCollector {
         source_ip: Option<String>, 
         source_name: String, 
         port: u16,
-        rx: channel::Receiver<String>,
-        fp_tx: channel::Sender<FlowMessage>,
+        rx: tokio::sync::mpsc::UnboundedReceiver<String>,
+        fp_tx: tokio::sync::mpsc::UnboundedSender<FlowMessage>,
     ) -> Result<FlowCollector, Error> {
     
         let srcip:String = match source_ip {
@@ -44,42 +44,37 @@ impl FlowCollector {
     }
 
     // #[instrument]
-    pub fn start(&mut self) { 
+    pub async fn start(&mut self) { 
 
         let socket = UdpSocket::bind(format!("0.0.0.0:{}", self.port))
-                                .expect("couldn't bind to address");
-        let _ = socket.set_nonblocking(true);
+            .await.expect("couldn't bind the udp socket");
 
         info!("Started listening for netflow from '{}' ({:?}) on port {}", self.source_name, self.source_ip, self.port);
 
         loop {
-            // Read from Socket
+            // Read from Socket OR from channel; whichever occurs first
             let mut buf = [0; 65_535];
-            match socket.recv_from(&mut buf) {
-                Ok((number_of_bytes, src_addr )) => {
-                    // println!("received data!");
+
+            // use async and tokio::select macro to avoid spinlocks
+            tokio::select! {
+                result = socket.recv_from(&mut buf) => {
+                    let (number_of_bytes, src_addr) = result.unwrap();
                     if  self.source_ip.len() == 0 || src_addr.ip() == IpAddr::from_str(&self.source_ip).unwrap() {
                         let filled_buf = &mut buf[..number_of_bytes];
                         let _ = self.fp_tx.send(FlowMessage::Datagram(filled_buf.to_owned()));
                     }
                 }
 
-                Err(e) => {
-                    if !matches!(e.kind(), ErrorKind::WouldBlock) {
-                        eprintln!("{}", e)
-                    }
-                }
-            }
-
-            // Now see if there is a command.
-            match self.rx.try_recv() {
-                Ok(cmd) => {
-                    debug!("Received command: {}", cmd);
-                    let _ = self.fp_tx.send(FlowMessage::Command(cmd));
-                }
-                Err(e ) => {
-                    if e.is_disconnected() {
-                        break;
+                cmd = self.rx.recv() => {
+                    match cmd {
+                        Some(cmd) => {
+                            debug!("Received command: {}", cmd);
+                            let _ = self.fp_tx.send(FlowMessage::Command(cmd));
+                        }
+                        None => {
+                            // Channel has closed
+                            break;
+                        }
                     }
                 }
             }

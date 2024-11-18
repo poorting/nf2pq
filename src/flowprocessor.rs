@@ -1,22 +1,15 @@
 use std::fmt::Debug;
-use std::sync::Arc;
-use anyhow::Error;
-// use std::net::*;
-// use domain::base::*;
-use std::fs::File;
+// use std::sync::Arc;
+// use std::fs::File;
 use bytes::BytesMut;
-// use log::debug;
-// use serde_json::Value;
-use arrow::datatypes::*;
-use arrow::array::*;
-use arrow::datatypes::DataType::*;
+// use arrow::datatypes::*;
 use netgauze_flow_pkt::netflow::NetFlowV9Packet;
 use tokio_util::codec::Decoder;
-use parquet::{
-    basic::{Compression, Encoding},
-    file::properties::*,
-    arrow::ArrowWriter,
-};
+// use parquet::{
+//     basic::{Compression, Encoding},
+//     file::properties::*,
+//     arrow::ArrowWriter,
+// };
 use netgauze_flow_pkt::{
     codec::FlowInfoCodec, 
     netflow::Set,
@@ -24,12 +17,14 @@ use netgauze_flow_pkt::{
     ie::Field::*,
     ie::protocolIdentifier,
 };
-use serde::{Deserialize, Serialize};
-// use serde_json::Result;
+// use serde::{Deserialize, Serialize};
 use crossbeam::channel::{self};
-use tracing::{instrument, info, debug, error};
-use clickhouse::{Client, inserter, Row};
+use tracing::{info, debug, error};
+// use clickhouse::{Client, inserter, Row};
 
+use crate::flowstats::*;
+use crate::flowwriter::*;
+use crate::flowinserter::*;
 
 // Exchange of information between collector and processor
 // can contain message (e.g. rotate flow file) or received datagram
@@ -40,140 +35,145 @@ pub enum FlowMessage {
 }
 
 
-#[derive(Debug)]
+// #[derive(Debug)]
 pub struct FlowProcessor {
     source_name : String, 
-    base_dir    : String,
-    rx          : channel::Receiver<FlowMessage>,
-    schema      : Schema,         // Schema of the parquet file
-    writer      : ArrowWriter<std::fs::File>,
+    // base_dir    : String,
+    rx          : tokio::sync::mpsc::UnboundedReceiver<FlowMessage>,
+    // schema      : Schema,         // Schema of the parquet file
+    // writer      : ArrowWriter<std::fs::File>,
     parser      : FlowInfoCodec,
-    flows       : Vec<FlowStats>,  // Will contain flowstats
+    // flows       : Vec<FlowStats>,  // Will contain flowstats
+    flow_writer  : Option<FlowWriter>,
+    flow_inserter: Option<FlowInserter>,
 }
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize, Row)]
-pub struct FlowStats {
-    pub ts      : Option<i64>,
-    pub te      : Option<i64>,
-    pub sa      : Option<String>,
-    pub da      : Option<String>,
-    pub sp      : Option<u16>,
-    pub dp      : Option<u16>,
-    pub pr      : Option<String>,
-    pub flg     : Option<String>,
-    // pub icmp_type: Option<u8>,
-    // pub icmp_code: Option<u8>,
-    pub ipkt    : Option<u64>,
-    pub ibyt    : Option<u64>,
-    pub smk     : Option<u8>,
-    pub dmk     : Option<u8>,
-    pub ra      : Option<String>,
-    pub inif    : Option<u16>,
-    pub outif   : Option<u16>,
-    pub sas     : Option<u32>,
-    pub das     : Option<u32>,
-    pub exid    : Option<u16>,
-}
 
 impl FlowProcessor {
     pub fn new(
         source_name: String, 
-        base_dir: String,
-        rx: channel::Receiver<FlowMessage>,
+        // base_dir: String,
+        rx: tokio::sync::mpsc::UnboundedReceiver<FlowMessage>,
+        flow_writer: Option<FlowWriter>,
+        flow_inserter: Option<FlowInserter>,
     ) -> Result<FlowProcessor, std::io::Error> {
-
-        let fields = FlowStats::create_fields();
-        let schema = Schema::new(fields.clone());
-        let filename = format!("{}/{}.current.parquet", base_dir, source_name);
-        let props = WriterProperties::builder()
-        .set_writer_version(WriterVersion::PARQUET_2_0)
-        .set_encoding(Encoding::PLAIN)
-        .set_compression(Compression::SNAPPY)
-        .build();
-    // .set_column_encoding(ColumnPath::from("col1"), Encoding::DELTA_BINARY_PACKED)
-    
-        // eprintln!("Trying to open file {}", filename);
-        let file =  match File::create(filename.clone()) {
-            Ok(file) => file,
-            Err(error) =>
-            {
-                error!("Could not open file: {}", filename.clone());
-                return Err(error);
-            }
-        };
-
-        let writer = 
-            ArrowWriter::try_new(file, Arc::new(schema.clone()), Some(props))
-            .expect("Error opening parquet file");
 
         let fp = FlowProcessor {
             source_name : source_name.to_string(),
-            base_dir    : base_dir.to_string(),
+            // base_dir    : base_dir.to_string(),
             rx          : rx,
-            schema      : schema.clone(),
-            writer      : writer,
             parser      : FlowInfoCodec::default(),
-            flows       : Vec::new(),
+            flow_writer  : flow_writer,
+            flow_inserter: flow_inserter,
         };
 
         return Ok(fp);
     }
 
-    pub fn start(&mut self) {
+    pub async fn start(&mut self) {
         // Listen to rx, 
         // check each message if it contains command or received datagram
-        for msg in self.rx.clone().iter() {
-            match msg {
-                FlowMessage::Command(cmd) => {
-                    if cmd.starts_with("flush") {
-                        debug!("Received command: {}", cmd.clone());
-                        let mut parts = cmd.split_whitespace();
-                        if parts.clone().count()>1 {
-                            debug!("Have info on {} flows", self.flows.len());
-                            self.rotate(parts.nth(1).unwrap());
-                        }
-                    } else {
-                        println!("received command: {}", cmd);
-                    }
-                }
-                FlowMessage::Datagram(udp) => {
-                    let mut bm_buf = BytesMut::with_capacity(0);
-                    bm_buf.extend_from_slice(&udp);
+        // for msg in self.rx.clone().iter() {
+        //     match msg {
+        //         FlowMessage::Command(cmd) => {
+        //             if cmd.starts_with("flush") {
+        //                 debug!("Received command: {}", cmd.clone());
+        //                 let mut parts = cmd.split_whitespace();
+        //                 if let Some(fw) = self.flow_writer.as_mut() {
+        //                     fw.rotate(parts.nth(1).unwrap());
+        //                 }
+        //             } else {
+        //                 println!("received command: {}", cmd);
+        //             }
+        //         }
+        //         FlowMessage::Datagram(udp) => {
+        //             let mut bm_buf = BytesMut::with_capacity(0);
+        //             bm_buf.extend_from_slice(&udp);
             
-                    let result = self.parser.decode(&mut bm_buf);
+        //             let result = self.parser.decode(&mut bm_buf);
             
-                    match result {
-                        Ok(Some(pkt)) => {
-                            match pkt {
-                                NetFlowV9(v9pkt) => {
-                                    self.process_v9packet(v9pkt);
+        //             match result {
+        //                 Ok(Some(pkt)) => {
+        //                     match pkt {
+        //                         NetFlowV9(v9pkt) => {
+        //                             self.process_v9packet(v9pkt).await;
+        //                         }
+        //                         _ => () // ignore everything else (IPFIX)
+        //                     }
+        //                 }
+        //                 Ok(None) => {
+        //                     debug!("Ok(None) from parser.decode");
+        //                 },
+        //                 Err(error) => {
+        //                     error!("Error decoding flow packet: {:?}",error);
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
+        loop {
+            match self.rx.recv().await {
+                Some(msg) => {
+                    match msg {
+                        FlowMessage::Command(cmd) => {
+                            if cmd.starts_with("flush") {
+                                debug!("Received command: {}", cmd.clone());
+                                let mut parts = cmd.split_whitespace();
+                                if let Some(fw) = self.flow_writer.as_mut() {
+                                    fw.rotate(parts.nth(1).unwrap());
                                 }
-                                _ => () // ignore everything else (IPFIX)
+                            } else {
+                                println!("received command: {}", cmd);
                             }
                         }
-                        Ok(None) => {
-                            debug!("Ok(None) from parser.decode");
-                        },
-                        Err(error) => {
-                            error!("Error decoding flow packet: {:?}",error);
+                        FlowMessage::Datagram(udp) => {
+                            let mut bm_buf = BytesMut::with_capacity(0);
+                            bm_buf.extend_from_slice(&udp);
+                    
+                            let result = self.parser.decode(&mut bm_buf);
+                    
+                            match result {
+                                Ok(Some(pkt)) => {
+                                    match pkt {
+                                        NetFlowV9(v9pkt) => {
+                                            self.process_v9packet(v9pkt).await;
+                                        }
+                                        _ => () // ignore everything else (IPFIX)
+                                    }
+                                }
+                                Ok(None) => {
+                                    debug!("Ok(None) from parser.decode");
+                                },
+                                Err(error) => {
+                                    error!("Error decoding flow packet: {:?}",error);
+                                }
+                            }
                         }
                     }
                 }
+                None => {
+                    break;
+                }
             }
-        }
+
+        };
 
         info!("flowprocessor '{}' exiting gracefully", self.source_name);
-        self.close_current();
+        if let Some(fw) = self.flow_writer.as_mut() {
+            fw.close_current();
+        }
+        // self.close_current();
 
     }
 
-    fn process_v9packet(&mut self, v9pkt: NetFlowV9Packet) {
+    async fn process_v9packet(&mut self, v9pkt: NetFlowV9Packet) {
         for set in v9pkt.sets() {
             // println!("{:?}", set);
             match set {
                 Set::Data{ records, ..} => {
                     for record in records {
                         let mut flow = FlowStats::new();
+                        flow.flowsrc = Some(self.source_name.clone());
                         // println!("*********************************************");
                         for field in record.fields() {
                             // println!("{:?}", field);
@@ -220,10 +220,9 @@ impl FlowProcessor {
                                 _ => ()
                             }
                         }
-                        // println!("Scope Fields: {:?}", record.scope_fields());
-                        let j = serde_json::to_string(&flow).expect("Error serializing to json");
-                        debug!("{}",j);
-                        self.push(flow);
+                        // let j = serde_json::to_string(&flow).expect("Error serializing to json");
+                        // debug!("{}",j);
+                        self.push(flow).await;
                     }
                 }
                 _ => () // Something else than Set
@@ -273,150 +272,17 @@ impl FlowProcessor {
     }
 
 
-    pub fn push(&mut self, flow: FlowStats) {
+    pub async fn push(&mut self, flow: FlowStats) {
 
-        self.flows.push(flow);
-
-        if self.flows.len() >= 1_000_000 {
-            self.write_batch();
+        if let Some(fw) = self.flow_writer.as_mut() {
+            fw.push(flow.clone());
         }
-
-    }
-
-    fn write_batch(&mut self) {
-        let batch = self.record_batch();
-        debug!("Writing batch ('{}' - {} flows)", self.source_name, batch.num_rows());
-        self.writer.write(&batch).unwrap();
-        self.flows = Vec::new();
-    }
-
-
-    fn close_current(&mut self) {
-        // self.flush();
-        // write any remaining flows
-        self.write_batch();
-        let _ = self.writer.flush();
-        match self.writer.finish() {
-            Err(error) => {
-                error!("Error closing writer for '{}' - {:?}", self.source_name, error);
-            }
-            _ => {
-                debug!("Closed writer for '{}'", self.source_name);
-            }
+        if let Some(fi) = self.flow_inserter.as_mut() {
+            fi.push(flow.clone()).await;
         }
-    }
-
-    fn rotate(&mut self, target:&str) {
-        // Close current, rename, open new
-        self.close_current();
-        let filename = format!("{}/{}.current.parquet", self.base_dir.clone(), self.source_name.clone());
-        // Rename to naming scheme
-        let to_file = format!("{}/{}-{}.parquet", self.base_dir.clone(), self.source_name.clone(), target);
-        debug!("rename {} -> {}", filename.clone(), to_file.clone());
-        std::fs::rename(filename.clone(), to_file.clone()).unwrap();
-        // Create new one
-        let props = WriterProperties::builder()
-        .set_writer_version(WriterVersion::PARQUET_2_0)
-        .set_encoding(Encoding::PLAIN)
-        .set_compression(Compression::SNAPPY)
-        .build();
-    // .set_column_encoding(ColumnPath::from("col1"), Encoding::DELTA_BINARY_PACKED)
-    
-        // eprintln!("Trying to open file {}", filename);
-        let file = File::create(filename).unwrap();
-        self.writer = ArrowWriter::try_new(file, Arc::new(self.schema.clone()), Some(props)).unwrap();
-    }
-
-    fn record_batch(&mut self) -> RecordBatch {
-        let ts = TimestampMicrosecondArray::from(self.flows.iter().map(|p| p.ts).collect::<Vec<Option<i64>>>());
-        let te = TimestampMicrosecondArray::from(self.flows.iter().map(|p| p.te).collect::<Vec<Option<i64>>>());
-        let sa = GenericStringArray::<i32>::from(self.flows.iter().map(|p| p.sa.clone()).collect::<Vec<Option<String>>>());
-        let da = GenericStringArray::<i32>::from(self.flows.iter().map(|p| p.da.clone()).collect::<Vec<Option<String>>>());
-        let sp = UInt16Array::from(self.flows.iter().map(|p| p.sp).collect::<Vec<Option<u16>>>());
-        let dp = UInt16Array::from(self.flows.iter().map(|p| p.dp).collect::<Vec<Option<u16>>>());
-        let pr = GenericStringArray::<i32>::from(self.flows.iter().map(|p| p.pr.clone()).collect::<Vec<Option<String>>>());
-        let flg = GenericStringArray::<i32>::from(self.flows.iter().map(|p| p.flg.clone()).collect::<Vec<Option<String>>>());
-        // let icmp_type = UInt8Array::from(self.flows.iter().map(|p| p.icmp_type).collect::<Vec<Option<u8>>>());
-        // let icmp_code = UInt8Array::from(self.flows.iter().map(|p| p.icmp_code).collect::<Vec<Option<u8>>>());
-        let ipkt = UInt64Array::from(self.flows.iter().map(|p| p.ipkt).collect::<Vec<Option<u64>>>());
-        let ibyt = UInt64Array::from(self.flows.iter().map(|p| p.ibyt).collect::<Vec<Option<u64>>>());
-        let smk = UInt8Array::from(self.flows.iter().map(|p| p.smk).collect::<Vec<Option<u8>>>());
-        let dmk = UInt8Array::from(self.flows.iter().map(|p| p.dmk).collect::<Vec<Option<u8>>>());
-        let ra = GenericStringArray::<i32>::from(self.flows.iter().map(|p| p.ra.clone()).collect::<Vec<Option<String>>>());
-        let inif = UInt16Array::from(self.flows.iter().map(|p| p.inif).collect::<Vec<Option<u16>>>());
-        let outif = UInt16Array::from(self.flows.iter().map(|p| p.outif).collect::<Vec<Option<u16>>>());
-        let sas = UInt32Array::from(self.flows.iter().map(|p| p.sas).collect::<Vec<Option<u32>>>());
-        let das = UInt32Array::from(self.flows.iter().map(|p| p.das).collect::<Vec<Option<u32>>>());
-        let exid = UInt16Array::from(self.flows.iter().map(|p| p.exid).collect::<Vec<Option<u16>>>());
-        let flowsrc = GenericStringArray::<i32>::from(vec![self.source_name.clone(); self.flows.len()]);
-
-        let batch = RecordBatch::try_new(
-            Arc::new(self.schema.clone()),
-            vec![
-                Arc::new(ts),
-                Arc::new(te),
-                Arc::new(sa),
-                Arc::new(da),
-                Arc::new(sp),
-                Arc::new(dp),
-                Arc::new(pr),
-                Arc::new(flg),
-                // Arc::new(icmp_type),
-                // Arc::new(icmp_code),
-                Arc::new(ipkt),
-                Arc::new(ibyt),
-                Arc::new(smk),
-                Arc::new(dmk),
-                Arc::new(ra),
-                Arc::new(inif),
-                Arc::new(outif),
-                Arc::new(sas),
-                Arc::new(das),
-                Arc::new(exid),
-                Arc::new(flowsrc),
-                ]
-        ).unwrap();
-
-        return batch;
-
     }
 
 
 }
 
-impl FlowStats {
-    pub fn new() -> FlowStats {
-        FlowStats { ..Default::default()}
-    }
-
-    pub fn create_fields() -> Vec<Field> {
-        let mut fields: Vec<Field> = Vec::new();
-    
-        fields.push(Field::new("ts", Timestamp(TimeUnit::Microsecond, None), true));
-        fields.push(Field::new("te", Timestamp(TimeUnit::Microsecond, None), true));
-        fields.push(Field::new("sa", Utf8, true));
-        fields.push(Field::new("da", Utf8, true));
-        fields.push(Field::new("sp", UInt16, true));
-        fields.push(Field::new("dp", UInt16, true));
-        fields.push(Field::new("pr", Utf8, true));
-        fields.push(Field::new("flg", Utf8, true));
-        // fields.push(Field::new("icmp_type", UInt8, true));
-        // fields.push(Field::new("icmp_code", UInt8, true));
-        fields.push(Field::new("ipkt", UInt64, true));
-        fields.push(Field::new("ibyt", UInt64, true));
-        fields.push(Field::new("smk", UInt8, true));
-        fields.push(Field::new("dmk", UInt8, true));
-        fields.push(Field::new("ra", Utf8, true));
-        fields.push(Field::new("inif", UInt16, true));
-        fields.push(Field::new("outif", UInt16, true));
-        fields.push(Field::new("sas", UInt32, true));
-        fields.push(Field::new("das", UInt32, true));
-        fields.push(Field::new("exid", UInt16, true));
-        fields.push(Field::new("flowsrc", Utf8, true));
-
-        return fields;
-    }
-    
-   
-}
 

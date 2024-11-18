@@ -1,5 +1,5 @@
 [package]
-name = "nf2ch"
+name = "nf2pq"
 version = "0.2.0"
 edition = "2021"
 
@@ -20,6 +20,7 @@ parquet = "53.2.0"
 serde = "1.0.215"
 serde_json = "1.0.132"
 signal-hook = "0.3.17"
+tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7.12"
 tracing = { version = "0.1.40", features = ["attributes"] }
 tracing-appender = "0.2.3"

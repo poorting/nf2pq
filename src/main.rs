@@ -1,6 +1,7 @@
 use std::process::exit;
 use std::env::temp_dir;
 use clap::Parser;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use std::time::{Duration, SystemTime};
 use flowprocessor::{FlowMessage, FlowProcessor};
 use signal_hook::consts::{SIGABRT, SIGINT};
@@ -10,13 +11,15 @@ use flowccollector::FlowCollector;
 use tracing::level_filters::LevelFilter;
 use std::thread;
 use std::sync::Once;
-use crossbeam::channel::{self, unbounded};
-use tracing::{instrument, info, debug, error};
-// use tracing_appender::rolling::{Rotation, RollingFileAppender};
+use crossbeam::channel::unbounded;
+use tracing::{instrument, info, debug};
 use configparser::ini::Ini;
 
 pub mod flowprocessor;
 pub mod flowccollector;
+pub mod flowstats;
+pub mod flowwriter;
+pub mod flowinserter;
 
 // This will be called when SIGINT/SIGABRT is received
 // Can be tested by the main loop to see if we need to exit
@@ -54,9 +57,9 @@ fn get_next_timer(minutes:u64) -> (Duration, String) {
     (next_ts, next_dt_str)
 }
 
-
+#[tokio::main(flavor = "multi_thread", worker_threads = 5)]
 #[instrument]
-fn main() {
+async fn main() {
 
     let args = Args::parse();
 
@@ -121,15 +124,20 @@ fn main() {
     // to get the UDP datagrams out of the receiving buffer ASAP.
     let mut fc_threads = Vec::new();
     let mut fp_threads = Vec::new();
-    let mut fc_txs: Vec<channel::Sender<String>> = Vec::new();
+    let mut fc_txs: Vec<UnboundedSender<String>> = Vec::new();
     
     // Create all flow collectors and processors (start with only one pair)
     // message channel between main and collector
-    let (tx, rx) = unbounded::<String>();
+    let (tx, rx) = unbounded_channel::<String>();
     // message channel between collector and processor
-    let (fp_tx, fp_rx) = unbounded::<FlowMessage>();
+    let (fp_tx, fp_rx) = unbounded_channel::<FlowMessage>();
 
     let fc_thread = thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .worker_threads(1)
+            .build()
+            .unwrap();
         let mut collector = FlowCollector::new(
             // "192.168.0.7".to_string(), 
             None,
@@ -137,20 +145,49 @@ fn main() {
             9995, 
             rx,
             fp_tx ).unwrap();
-        collector.start();
+
+            rt.block_on( async {collector.start().await;});
     });
     fc_threads.push(fc_thread);
     fc_txs.push(tx);
 
+    let flowwriter = flowwriter::FlowWriter::new(
+        "home".to_string(),
+        args.directory,
+    );
+
+    let fw = match flowwriter {
+        Ok(flowwriter) => Some(flowwriter),
+        _ => None,
+    };
+
+    // let flowinserter = flowinserter::FlowInserter::new("testdb.testflows".to_string(), 90);
+    // let fi = match flowinserter {
+    //     Ok(mut flowinserter) => {
+    //         flowinserter.create_db_and_table().await;
+    //         Some(flowinserter)
+    //     }
+    //     _ => None,
+    // };
+
+    let fi=None;
+
     let processor_result = FlowProcessor::new(
         "home".to_string(), 
-        args.directory, 
-        fp_rx);
+        fp_rx,
+        fw,
+        fi);
     match processor_result {
         Ok(mut processor) => {
             let fp_thread = thread::spawn(move || {
-                processor.start();
-            });
+                let rt = tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .worker_threads(1)
+                    .build()
+                    .unwrap();
+                // processor.start().await;
+                rt.block_on( async {processor.start().await;});
+                });
             fp_threads.push(fp_thread);
         }
         Err( _ ) => {
