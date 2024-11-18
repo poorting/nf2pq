@@ -9,7 +9,7 @@ use arrow::datatypes::DataType::*;
 use serde::{Deserialize, Serialize};
 use clickhouse::Row;
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize, Row)]
+#[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize, Row)]
 pub struct FlowStats {
     pub ts      : Option<i64>,
     pub te      : Option<i64>,

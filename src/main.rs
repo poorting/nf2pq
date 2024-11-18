@@ -130,7 +130,7 @@ async fn main() {
     // message channel between main and collector
     let (tx, rx) = unbounded_channel::<String>();
     // message channel between collector and processor
-    let (fp_tx, fp_rx) = unbounded_channel::<FlowMessage>();
+    let (fp_tx, fp_rx) = unbounded::<FlowMessage>();
 
     let fc_thread = thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_multi_thread()
@@ -161,6 +161,7 @@ async fn main() {
         _ => None,
     };
 
+    let fi=None;
     // let flowinserter = flowinserter::FlowInserter::new("testdb.testflows".to_string(), 90);
     // let fi = match flowinserter {
     //     Ok(mut flowinserter) => {
@@ -170,8 +171,6 @@ async fn main() {
     //     _ => None,
     // };
 
-    let fi=None;
-
     let processor_result = FlowProcessor::new(
         "home".to_string(), 
         fp_rx,
@@ -180,13 +179,7 @@ async fn main() {
     match processor_result {
         Ok(mut processor) => {
             let fp_thread = thread::spawn(move || {
-                let rt = tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .worker_threads(1)
-                    .build()
-                    .unwrap();
-                // processor.start().await;
-                rt.block_on( async {processor.start().await;});
+                processor.start();
                 });
             fp_threads.push(fp_thread);
         }

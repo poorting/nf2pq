@@ -15,7 +15,7 @@ pub struct FlowCollector {
     source_name: String,
     port: u16,              // port to listen on
     rx      : tokio::sync::mpsc::UnboundedReceiver<String>,
-    fp_tx   : tokio::sync::mpsc::UnboundedSender<FlowMessage>,
+    fp_tx   : channel::Sender<FlowMessage>,
  }
 
 impl FlowCollector {
@@ -25,7 +25,7 @@ impl FlowCollector {
         source_name: String, 
         port: u16,
         rx: tokio::sync::mpsc::UnboundedReceiver<String>,
-        fp_tx: tokio::sync::mpsc::UnboundedSender<FlowMessage>,
+        fp_tx: channel::Sender<FlowMessage>,
     ) -> Result<FlowCollector, Error> {
     
         let srcip:String = match source_ip {

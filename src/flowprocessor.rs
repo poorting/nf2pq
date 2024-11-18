@@ -39,7 +39,7 @@ pub enum FlowMessage {
 pub struct FlowProcessor {
     source_name : String, 
     // base_dir    : String,
-    rx          : tokio::sync::mpsc::UnboundedReceiver<FlowMessage>,
+    rx          : channel::Receiver<FlowMessage>,
     // schema      : Schema,         // Schema of the parquet file
     // writer      : ArrowWriter<std::fs::File>,
     parser      : FlowInfoCodec,
@@ -53,7 +53,7 @@ impl FlowProcessor {
     pub fn new(
         source_name: String, 
         // base_dir: String,
-        rx: tokio::sync::mpsc::UnboundedReceiver<FlowMessage>,
+        rx: channel::Receiver<FlowMessage>,
         flow_writer: Option<FlowWriter>,
         flow_inserter: Option<FlowInserter>,
     ) -> Result<FlowProcessor, std::io::Error> {
@@ -70,93 +70,93 @@ impl FlowProcessor {
         return Ok(fp);
     }
 
-    pub async fn start(&mut self) {
+    pub fn start(&mut self) {
         // Listen to rx, 
         // check each message if it contains command or received datagram
-        // for msg in self.rx.clone().iter() {
-        //     match msg {
-        //         FlowMessage::Command(cmd) => {
-        //             if cmd.starts_with("flush") {
-        //                 debug!("Received command: {}", cmd.clone());
-        //                 let mut parts = cmd.split_whitespace();
-        //                 if let Some(fw) = self.flow_writer.as_mut() {
-        //                     fw.rotate(parts.nth(1).unwrap());
-        //                 }
-        //             } else {
-        //                 println!("received command: {}", cmd);
-        //             }
-        //         }
-        //         FlowMessage::Datagram(udp) => {
-        //             let mut bm_buf = BytesMut::with_capacity(0);
-        //             bm_buf.extend_from_slice(&udp);
+        for msg in self.rx.clone().iter() {
+            match msg {
+                FlowMessage::Command(cmd) => {
+                    if cmd.starts_with("flush") {
+                        debug!("Received command: {}", cmd.clone());
+                        let mut parts = cmd.split_whitespace();
+                        if let Some(fw) = self.flow_writer.as_mut() {
+                            fw.rotate(parts.nth(1).unwrap());
+                        }
+                    } else {
+                        println!("received command: {}", cmd);
+                    }
+                }
+                FlowMessage::Datagram(udp) => {
+                    let mut bm_buf = BytesMut::with_capacity(0);
+                    bm_buf.extend_from_slice(&udp);
             
-        //             let result = self.parser.decode(&mut bm_buf);
+                    let result = self.parser.decode(&mut bm_buf);
             
-        //             match result {
-        //                 Ok(Some(pkt)) => {
-        //                     match pkt {
-        //                         NetFlowV9(v9pkt) => {
-        //                             self.process_v9packet(v9pkt).await;
-        //                         }
-        //                         _ => () // ignore everything else (IPFIX)
-        //                     }
-        //                 }
-        //                 Ok(None) => {
-        //                     debug!("Ok(None) from parser.decode");
-        //                 },
-        //                 Err(error) => {
-        //                     error!("Error decoding flow packet: {:?}",error);
-        //                 }
-        //             }
-        //         }
-        //     }
-        // }
-        loop {
-            match self.rx.recv().await {
-                Some(msg) => {
-                    match msg {
-                        FlowMessage::Command(cmd) => {
-                            if cmd.starts_with("flush") {
-                                debug!("Received command: {}", cmd.clone());
-                                let mut parts = cmd.split_whitespace();
-                                if let Some(fw) = self.flow_writer.as_mut() {
-                                    fw.rotate(parts.nth(1).unwrap());
+                    match result {
+                        Ok(Some(pkt)) => {
+                            match pkt {
+                                NetFlowV9(v9pkt) => {
+                                    self.process_v9packet(v9pkt);
                                 }
-                            } else {
-                                println!("received command: {}", cmd);
+                                _ => () // ignore everything else (IPFIX)
                             }
                         }
-                        FlowMessage::Datagram(udp) => {
-                            let mut bm_buf = BytesMut::with_capacity(0);
-                            bm_buf.extend_from_slice(&udp);
-                    
-                            let result = self.parser.decode(&mut bm_buf);
-                    
-                            match result {
-                                Ok(Some(pkt)) => {
-                                    match pkt {
-                                        NetFlowV9(v9pkt) => {
-                                            self.process_v9packet(v9pkt).await;
-                                        }
-                                        _ => () // ignore everything else (IPFIX)
-                                    }
-                                }
-                                Ok(None) => {
-                                    debug!("Ok(None) from parser.decode");
-                                },
-                                Err(error) => {
-                                    error!("Error decoding flow packet: {:?}",error);
-                                }
-                            }
+                        Ok(None) => {
+                            debug!("Ok(None) from parser.decode");
+                        },
+                        Err(error) => {
+                            error!("Error decoding flow packet: {:?}",error);
                         }
                     }
                 }
-                None => {
-                    break;
-                }
             }
+        }
+        // loop {
+        //     match self.rx.recv().await {
+        //         Some(msg) => {
+        //             match msg {
+        //                 FlowMessage::Command(cmd) => {
+        //                     if cmd.starts_with("flush") {
+        //                         debug!("Received command: {}", cmd.clone());
+        //                         let mut parts = cmd.split_whitespace();
+        //                         if let Some(fw) = self.flow_writer.as_mut() {
+        //                             fw.rotate(parts.nth(1).unwrap());
+        //                         }
+        //                     } else {
+        //                         println!("received command: {}", cmd);
+        //                     }
+        //                 }
+        //                 FlowMessage::Datagram(udp) => {
+        //                     let mut bm_buf = BytesMut::with_capacity(0);
+        //                     bm_buf.extend_from_slice(&udp);
+                    
+        //                     let result = self.parser.decode(&mut bm_buf);
+                    
+        //                     match result {
+        //                         Ok(Some(pkt)) => {
+        //                             match pkt {
+        //                                 NetFlowV9(v9pkt) => {
+        //                                     self.process_v9packet(v9pkt).await;
+        //                                 }
+        //                                 _ => () // ignore everything else (IPFIX)
+        //                             }
+        //                         }
+        //                         Ok(None) => {
+        //                             debug!("Ok(None) from parser.decode");
+        //                         },
+        //                         Err(error) => {
+        //                             error!("Error decoding flow packet: {:?}",error);
+        //                         }
+        //                     }
+        //                 }
+        //             }
+        //         }
+        //         None => {
+        //             break;
+        //         }
+        //     }
 
-        };
+        // };
 
         info!("flowprocessor '{}' exiting gracefully", self.source_name);
         if let Some(fw) = self.flow_writer.as_mut() {
@@ -166,7 +166,7 @@ impl FlowProcessor {
 
     }
 
-    async fn process_v9packet(&mut self, v9pkt: NetFlowV9Packet) {
+    fn process_v9packet(&mut self, v9pkt: NetFlowV9Packet) {
         for set in v9pkt.sets() {
             // println!("{:?}", set);
             match set {
@@ -222,7 +222,7 @@ impl FlowProcessor {
                         }
                         // let j = serde_json::to_string(&flow).expect("Error serializing to json");
                         // debug!("{}",j);
-                        self.push(flow).await;
+                        self.push(flow);
                     }
                 }
                 _ => () // Something else than Set
@@ -272,13 +272,13 @@ impl FlowProcessor {
     }
 
 
-    pub async fn push(&mut self, flow: FlowStats) {
+    pub fn push(&mut self, flow: FlowStats) {
 
         if let Some(fw) = self.flow_writer.as_mut() {
             fw.push(flow.clone());
         }
         if let Some(fi) = self.flow_inserter.as_mut() {
-            fi.push(flow.clone()).await;
+            fi.push(flow.clone());
         }
     }
 

@@ -67,7 +67,7 @@ impl FlowWriter {
 
         self.flows.push(flow);
 
-        if self.flows.len() >= 1_000_000 {
+        if self.flows.len() >= 250_000 {
             self.write_batch();
         }
 
