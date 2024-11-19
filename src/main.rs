@@ -48,7 +48,7 @@ struct Args {
 
 #[instrument]
 fn get_next_timer(minutes:u64) -> (Duration, String) {
-    let secs: u64 = minutes*60;
+    let secs: u64 = minutes;
     let now_ts = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
     let next_ts:Duration = Duration::new((u64::from( now_ts.as_secs() / secs)+1)*secs , 0);
     let next_dt:DateTime<Local> = Utc.timestamp_opt(next_ts.as_secs() as i64, 0).unwrap().into();
@@ -161,21 +161,10 @@ async fn main() {
         _ => None,
     };
 
-    let fi=None;
-    // let flowinserter = flowinserter::FlowInserter::new("testdb.testflows".to_string(), 90);
-    // let fi = match flowinserter {
-    //     Ok(mut flowinserter) => {
-    //         flowinserter.create_db_and_table().await;
-    //         Some(flowinserter)
-    //     }
-    //     _ => None,
-    // };
-
     let processor_result = FlowProcessor::new(
         "home".to_string(), 
         fp_rx,
-        fw,
-        fi);
+        fw);
     match processor_result {
         Ok(mut processor) => {
             let fp_thread = thread::spawn(move || {

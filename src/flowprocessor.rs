@@ -45,7 +45,6 @@ pub struct FlowProcessor {
     parser      : FlowInfoCodec,
     // flows       : Vec<FlowStats>,  // Will contain flowstats
     flow_writer  : Option<FlowWriter>,
-    flow_inserter: Option<FlowInserter>,
 }
 
 
@@ -55,7 +54,6 @@ impl FlowProcessor {
         // base_dir: String,
         rx: channel::Receiver<FlowMessage>,
         flow_writer: Option<FlowWriter>,
-        flow_inserter: Option<FlowInserter>,
     ) -> Result<FlowProcessor, std::io::Error> {
 
         let fp = FlowProcessor {
@@ -64,7 +62,6 @@ impl FlowProcessor {
             rx          : rx,
             parser      : FlowInfoCodec::default(),
             flow_writer  : flow_writer,
-            flow_inserter: flow_inserter,
         };
 
         return Ok(fp);
@@ -80,7 +77,8 @@ impl FlowProcessor {
                         debug!("Received command: {}", cmd.clone());
                         let mut parts = cmd.split_whitespace();
                         if let Some(fw) = self.flow_writer.as_mut() {
-                            fw.rotate(parts.nth(1).unwrap());
+                            // fw.rotate(parts.nth(1).unwrap());
+                            fw.rotate(true);
                         }
                     } else {
                         println!("received command: {}", cmd);
@@ -160,9 +158,9 @@ impl FlowProcessor {
 
         info!("flowprocessor '{}' exiting gracefully", self.source_name);
         if let Some(fw) = self.flow_writer.as_mut() {
-            fw.close_current();
+            // fw.close_current();
+            fw.rotate(false);
         }
-        // self.close_current();
 
     }
 
@@ -276,9 +274,6 @@ impl FlowProcessor {
 
         if let Some(fw) = self.flow_writer.as_mut() {
             fw.push(flow.clone());
-        }
-        if let Some(fi) = self.flow_inserter.as_mut() {
-            fi.push(flow.clone());
         }
     }
 

@@ -7,6 +7,7 @@ use parquet::{
     file::properties::*,
     arrow::ArrowWriter,
 };
+use chrono::*;
 use tracing::{debug, error};
 
 
@@ -68,7 +69,8 @@ impl FlowWriter {
         self.flows.push(flow);
 
         if self.flows.len() >= 250_000 {
-            self.write_batch();
+            // self.write_batch();
+            self.rotate(true);
         }
 
     }
@@ -81,7 +83,7 @@ impl FlowWriter {
     }
 
 
-    pub fn close_current(&mut self) {
+    fn close_current(&mut self) {
         // self.flush();
         // write any remaining flows
         self.write_batch();
@@ -96,25 +98,29 @@ impl FlowWriter {
         }
     }
 
-    pub fn rotate(&mut self, target:&str) {
+    pub fn rotate(&mut self, open_new:bool) {
         // Close current, rename, open new
         self.close_current();
+        let loc_now: DateTime<Local> = Local::now();
+        debug!(" -> {}",loc_now.format("%Y-%m-%d %H:%M:%S%.6f"));
         let filename = format!("{}/{}.current.parquet", self.base_dir.clone(), self.source_name.clone());
         // Rename to naming scheme
-        let to_file = format!("{}/{}-{}.parquet", self.base_dir.clone(), self.source_name.clone(), target);
+        let to_file = format!("{}/{}-{}.parquet", self.base_dir.clone(), self.source_name.clone(), loc_now.format("%Y-%m-%d %H:%M:%S%.6f"));
         debug!("rename {} -> {}", filename.clone(), to_file.clone());
         std::fs::rename(filename.clone(), to_file.clone()).unwrap();
-        // Create new one
-        let props = WriterProperties::builder()
-        .set_writer_version(WriterVersion::PARQUET_2_0)
-        .set_encoding(Encoding::PLAIN)
-        .set_compression(Compression::SNAPPY)
-        .build();
-    // .set_column_encoding(ColumnPath::from("col1"), Encoding::DELTA_BINARY_PACKED)
-    
-        // eprintln!("Trying to open file {}", filename);
-        let file = File::create(filename).unwrap();
-        self.writer = ArrowWriter::try_new(file, Arc::new(self.schema.clone()), Some(props)).unwrap();
+        // Create new one if requested
+        if open_new {
+            let props = WriterProperties::builder()
+            .set_writer_version(WriterVersion::PARQUET_2_0)
+            .set_encoding(Encoding::PLAIN)
+            .set_compression(Compression::SNAPPY)
+            .build();
+        // .set_column_encoding(ColumnPath::from("col1"), Encoding::DELTA_BINARY_PACKED)
+        
+            // eprintln!("Trying to open file {}", filename);
+            let file = File::create(filename).unwrap();
+            self.writer = ArrowWriter::try_new(file, Arc::new(self.schema.clone()), Some(props)).unwrap();
+        }
     }
 
     fn record_batch(&mut self) -> RecordBatch {
