@@ -19,7 +19,7 @@ pub mod flowprocessor;
 pub mod flowccollector;
 pub mod flowstats;
 pub mod flowwriter;
-pub mod flowinserter;
+// pub mod flowinserter;
 
 // This will be called when SIGINT/SIGABRT is received
 // Can be tested by the main loop to see if we need to exit
@@ -154,6 +154,11 @@ async fn main() {
     let flowwriter = flowwriter::FlowWriter::new(
         "home".to_string(),
         args.directory,
+        Some("testdb.testflows".to_string()),
+        92,
+        None,
+        None,
+        None,
     );
 
     let fw = match flowwriter {

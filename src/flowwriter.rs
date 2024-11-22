@@ -9,7 +9,7 @@ use parquet::{
 };
 use chrono::*;
 use tracing::{debug, error};
-
+use std::process::Command;
 
 use crate::flowstats::*;
 
@@ -18,17 +18,31 @@ use crate::flowstats::*;
 pub struct FlowWriter {
     source_name : String, 
     base_dir    : String,
-    schema      : Schema,         // Schema of the parquet file
+    schema      : Schema,           // Schema of the parquet file
     writer      : ArrowWriter<std::fs::File>,
-    flows       : Vec<FlowStats>,  // Will contain flowstats
+    flows       : Vec<FlowStats>,   // Will contain flowstats
+    rotations   : u64,              // Number of rotations due to size between rotation ticks (timers)
+                                    // Used to determine if a rotation tick should
+                                    // lead to a forced rotation (shutdown will always do that)
+    insert_ch   : bool,             // Will be set to true if a db_table is given
+    ch_db_table : Option<String>,   // DB and table to write to (if any)
+    ch_ttl      : u64,              // TTL to set for the table (0 if none)
+    ch_host     : Option<String>,   // CH Host to use (localhost if None)
+    ch_user     : Option<String>,   // CH Username (default if None)
+    ch_pwd      : Option<String>,   // CH Password (or None)
 }
 
 
 impl FlowWriter {
     pub fn new(
-        source_name: String, 
-        base_dir: String,
-    ) -> Result<FlowWriter, std::io::Error>
+        source_name : String, 
+        base_dir    : String,
+        ch_db_table : Option<String>,   // DB and table to write to (if any)
+        ch_ttl      : u64,              // TTL to set for the table (0 if none)
+        ch_host     : Option<String>,   // CH Host to use (localhost if None)
+        ch_user     : Option<String>,   // CH Username (default if None)
+        ch_pwd      : Option<String>,   // CH Password (or None)
+        ) -> Result<FlowWriter, std::io::Error>
     {
         let fields = FlowStats::create_fields();
         let schema = Schema::new(fields.clone());
@@ -53,14 +67,26 @@ impl FlowWriter {
         let writer = 
             ArrowWriter::try_new(file, Arc::new(schema.clone()), Some(props))
             .expect("Error opening parquet file");
-
-        let fw = FlowWriter {
+   
+        let mut fw = FlowWriter {
             source_name : source_name.to_string(),
             base_dir    : base_dir.to_string(),
             schema      : schema.clone(),
             writer      : writer,
             flows       : Vec::new(),
+            rotations   : 0,
+            insert_ch   : ch_db_table.is_some(),
+            ch_db_table : ch_db_table,
+            ch_ttl      : ch_ttl,
+            ch_host     : ch_host,
+            ch_user     : ch_user,
+            ch_pwd      : ch_pwd,
         };
+
+        if fw.insert_ch {
+            fw.create_db_and_table();
+        }
+
         return Ok(fw);
     }
 
@@ -71,6 +97,7 @@ impl FlowWriter {
         if self.flows.len() >= 250_000 {
             // self.write_batch();
             self.rotate(true);
+            self.rotations += 1;
         }
 
     }
@@ -98,7 +125,26 @@ impl FlowWriter {
         }
     }
 
-    pub fn rotate(&mut self, open_new:bool) {
+    pub fn rotate_tick(&mut self, open_new: bool) {
+
+        if !open_new {  // Not opening a new one means we're shutting down
+            self.rotate(open_new);
+            return;
+        }
+
+        // If we have had more than 2 rotations between ticks: no need to force
+        if self.rotations < 3 {
+            // If we have no flows then no need to insert either
+            if self.flows.len() > 0 {
+                self.rotate(open_new);
+            }
+        } else {
+            debug!("Already enough rotations, not forcing");
+        }
+        self.rotations = 0;
+    }
+
+    fn rotate(&mut self, open_new:bool) {
         // Close current, rename, open new
         self.close_current();
         let loc_now: DateTime<Local> = Local::now();
@@ -121,6 +167,18 @@ impl FlowWriter {
             let file = File::create(filename).unwrap();
             self.writer = ArrowWriter::try_new(file, Arc::new(self.schema.clone()), Some(props)).unwrap();
         }
+    
+        // If we have a database then insert it into database and remove the rotated file
+        if self.insert_ch {
+            // Setting stdin to this file does not always work for some reason
+            // No flows inserted, but no errors either
+            // Following query (letting client read file itself) does seem to work however.
+            let query = format!("INSERT INTO {} FROM INFILE '{}' FORMAT Parquet", 
+                self.ch_db_table.as_ref().clone().unwrap(),
+                to_file.clone());
+            self.ch_query(query);
+        }
+
     }
 
     fn record_batch(&mut self) -> RecordBatch {
@@ -175,6 +233,111 @@ impl FlowWriter {
         ).unwrap();
 
         return batch;
+
+    }
+
+    // fn ch_insert(&mut self, filename: String) {
+    //     debug!("CH insert: {}", filename.clone());
+
+    //     let query = format!("INSERT INTO {} FORMAT Parquet", self.ch_db_table.as_ref().clone().unwrap());
+
+    //     let mut cmd = Command::new("clickhouse-client");
+    //     // if self.username.is_some() ...
+    //     if self.ch_host.is_some() {
+    //         cmd.arg("--host");
+    //         cmd.arg(self.ch_host.as_ref().unwrap().clone());
+    //     }
+    //     if self.ch_user.is_some() {
+    //         cmd.arg("--user");
+    //         cmd.arg(self.ch_user.as_ref().unwrap().clone());
+    //     }
+    //     if self.ch_pwd.is_some() {
+    //         cmd.arg("--password");
+    //         cmd.arg(self.ch_pwd.as_ref().unwrap().clone());
+    //     }
+    //     cmd.arg("--query");
+    //     cmd.arg(query);
+    // }
+
+    fn ch_query(&mut self, query: String) {
+
+        debug!("CH query: {}", query.clone());
+
+        let mut cmd = Command::new("clickhouse-client");
+        // if self.username.is_some() ...
+        if self.ch_host.is_some() {
+            cmd.arg("--host");
+            cmd.arg(self.ch_host.as_ref().unwrap().clone());
+        }
+        if self.ch_user.is_some() {
+            cmd.arg("--user");
+            cmd.arg(self.ch_user.as_ref().unwrap().clone());
+        }
+        if self.ch_pwd.is_some() {
+            cmd.arg("--password");
+            cmd.arg(self.ch_pwd.as_ref().unwrap().clone());
+        }
+        cmd.arg("--query");
+        cmd.arg(query);
+    
+
+        // let output = match cmd.output() {
+        let output = match cmd.spawn().expect("Error insert").wait_with_output() {
+            Err(e) => debug!("{:?}", e),
+            Ok(output) => {
+                if output.status.success() {
+                    debug!("stdout: {:?}", String::from_utf8(output.stdout) );
+                    debug!("stderr: {:?}", String::from_utf8(output.stderr) );
+                } else {
+                    debug!("Process failed: {:?}", String::from_utf8(output.stderr) );
+                }
+            }
+        };
+        debug!("{:#?}", output);
+    }
+    
+    fn create_db_and_table(&mut self) {
+
+        let ttlstr = match self.ch_ttl {
+            0 => "",
+            _ => &format!("TTL toDateTime(te) + toIntervalDay({})", self.ch_ttl)
+        };
+
+        let query = format!("
+            CREATE DATABASE IF NOT EXISTS {};
+            CREATE TABLE IF NOT EXISTS {}
+            (
+                `ts` DateTime64(6) DEFAULT 0,
+                `te` DateTime64(6) DEFAULT 0,
+                `sa` String,
+                `da` String,
+                `sp` UInt16 DEFAULT 0,
+                `dp` UInt16 DEFAULT 0,
+                `pr` Nullable(String),
+                `flg` LowCardinality(String),
+                `ipkt` UInt64,
+                `ibyt` UInt64,
+                `smk` UInt8,
+                `dmk` UInt8,
+                `ra` LowCardinality(String),
+                `inif` UInt16 DEFAULT 0,
+                `outif` UInt16 DEFAULT 0,
+                `sas` UInt32 DEFAULT 0,
+                `das` UInt32 DEFAULT 0,
+                `exid` UInt16 DEFAULT 0,
+                `flowsrc` LowCardinality(String)
+            )
+            ENGINE = MergeTree
+            PARTITION BY tuple()
+            PRIMARY KEY (ts, te)
+            ORDER BY (ts, te, sa, da)
+            {};",
+            self.ch_db_table.as_ref().unwrap().split(".").nth(0).unwrap(),
+            self.ch_db_table.as_ref().unwrap(),
+            ttlstr,
+        );
+
+        self.ch_query(query);
 
     }
 

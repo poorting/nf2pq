@@ -6,10 +6,10 @@ use arrow::datatypes::DataType::*;
 //     file::properties::*,
 //     arrow::ArrowWriter,
 // };
-use serde::{Deserialize, Serialize};
-use clickhouse::Row;
+// use serde::{Deserialize, Serialize};
+// use clickhouse::Row;
 
-#[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize, Row)]
+#[derive(Default, Debug, Clone)]
 pub struct FlowStats {
     pub ts      : Option<i64>,
     pub te      : Option<i64>,

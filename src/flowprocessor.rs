@@ -24,7 +24,6 @@ use tracing::{info, debug, error};
 
 use crate::flowstats::*;
 use crate::flowwriter::*;
-use crate::flowinserter::*;
 
 // Exchange of information between collector and processor
 // can contain message (e.g. rotate flow file) or received datagram
@@ -75,10 +74,8 @@ impl FlowProcessor {
                 FlowMessage::Command(cmd) => {
                     if cmd.starts_with("flush") {
                         debug!("Received command: {}", cmd.clone());
-                        let mut parts = cmd.split_whitespace();
                         if let Some(fw) = self.flow_writer.as_mut() {
-                            // fw.rotate(parts.nth(1).unwrap());
-                            fw.rotate(true);
+                            fw.rotate_tick(true);
                         }
                     } else {
                         println!("received command: {}", cmd);
@@ -159,7 +156,7 @@ impl FlowProcessor {
         info!("flowprocessor '{}' exiting gracefully", self.source_name);
         if let Some(fw) = self.flow_writer.as_mut() {
             // fw.close_current();
-            fw.rotate(false);
+            fw.rotate_tick(false);
         }
 
     }
