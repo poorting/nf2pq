@@ -11,6 +11,7 @@ use parquet::{
 use chrono::*;
 use tracing::{info, debug, error};
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 use crate::flowstats::*;
 
@@ -22,9 +23,7 @@ pub struct FlowWriter {
     schema      : Schema,           // Schema of the parquet file
     writer      : ArrowWriter<std::fs::File>,
     flows       : Vec<FlowStats>,   // Will contain flowstats
-    rotations   : u64,              // Number of rotations due to size between rotation ticks (timers)
-                                    // Used to determine if a rotation tick should
-                                    // lead to a forced rotation (shutdown will always do that)
+    last_rot    : Instant,          // Set when rotated, helps to determine if flush needed at next tick 
     insert_ch   : bool,             // Will be set to true if a db_table is given
     ch_db_table : Option<String>,   // DB and table to write to (if any)
     ch_ttl      : u64,              // TTL to set for the table (0 if none)
@@ -68,7 +67,7 @@ impl FlowWriter {
             schema      : schema.clone(),
             writer      : writer,
             flows       : Vec::new(),
-            rotations   : 0,
+            last_rot    : Instant::now(),
             insert_ch   : ch_db_table.is_some(),
             ch_db_table : ch_db_table,
             ch_ttl      : ch_ttl,
@@ -115,9 +114,9 @@ impl FlowWriter {
         self.flows.push(flow);
 
         if self.flows.len() >= 250_000 {
+            debug!("Buffer full. Rotating.");
             // self.write_batch();
             self.rotate(true);
-            self.rotations += 1;
         }
 
     }
@@ -139,37 +138,29 @@ impl FlowWriter {
             Err(error) => {
                 error!("Error closing writer : {:?}", error);
             }
-            _ => {
-                debug!("Closed writer");
-            }
+            _ => (),
         }
     }
 
     fn rotate_tick(&mut self, open_new: bool) {
 
-        debug!("FlowWriter tick");
-        if !open_new {  // Not opening a new one means we're shutting down
-            // set rotations to zero, so we're sure to flush
-            self.rotations = 0;
-        }
+        debug!("FlowWriter tick ({:?})", self.last_rot.elapsed() );
 
-        // If we have had more than 2 rotations between ticks: no need to force
-        if self.rotations < 3 {
-            // If we have no flows then no need to insert either
+        if self.last_rot.elapsed() > Duration::from_secs(2) || !open_new {
             if self.flows.len() > 0 {
                 self.rotate(open_new);
             }
         } else {
-            debug!("Already enough rotations, not forcing");
+            debug!("Last rotation less than 2 seconds ago, not bothered");
         }
-        self.rotations = 0;
     }
 
     fn rotate(&mut self, open_new:bool) {
+        // reset timer
+        self.last_rot = Instant::now();
         // Close current, rename, open new
         self.close_current();
         let loc_now: DateTime<Local> = Local::now();
-        debug!(" -> {}",loc_now.format("%Y-%m-%d-%H:%M:%S%.6f"));
         let filename = format!("{}/flows.current.parquet", self.base_dir.clone());
         // Rename to naming scheme
         let to_file = format!("{}/flows-{}.parquet", self.base_dir.clone(), loc_now.format("%Y-%m-%d-%H:%M:%S%.6f"));
@@ -201,7 +192,6 @@ impl FlowWriter {
 
             // If we insert into CH, then we delete the file afterwards
             std::fs::remove_file(to_file.clone()).unwrap();
-
         }
 
     }
