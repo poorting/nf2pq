@@ -3,7 +3,7 @@ use std::net::IpAddr;
 use tokio::net::UdpSocket;
 use anyhow::Error;
 use crossbeam::channel;
-use tracing::{instrument, info, debug};
+use tracing::{instrument, info};
 
 use crate::flowprocessor::*;
 
@@ -68,7 +68,7 @@ impl FlowCollector {
                 cmd = self.rx.recv() => {
                     match cmd {
                         Some(cmd) => {
-                            debug!("Received command: {}", cmd);
+                            // debug!("Received command: {}", cmd);
                             let _ = self.fp_tx.send(FlowMessage::Command(cmd));
                         }
                         None => {

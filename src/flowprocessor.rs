@@ -1,4 +1,7 @@
+// use core::time;
 use std::fmt::Debug;
+// use std::thread;
+// use arrow::ipc::DurationArgs;
 // use std::sync::Arc;
 // use std::fs::File;
 use bytes::BytesMut;
@@ -23,7 +26,7 @@ use tracing::{info, debug, error};
 // use clickhouse::{Client, inserter, Row};
 
 use crate::flowstats::*;
-use crate::flowwriter::*;
+// use crate::flowwriter::*;
 
 // Exchange of information between collector and processor
 // can contain message (e.g. rotate flow file) or received datagram
@@ -39,11 +42,12 @@ pub struct FlowProcessor {
     source_name : String, 
     // base_dir    : String,
     rx          : channel::Receiver<FlowMessage>,
+    tx          : channel::Sender<StatsMessage>,
     // schema      : Schema,         // Schema of the parquet file
     // writer      : ArrowWriter<std::fs::File>,
     parser      : FlowInfoCodec,
     // flows       : Vec<FlowStats>,  // Will contain flowstats
-    flow_writer  : Option<FlowWriter>,
+    // flow_writer  : Option<FlowWriter>,
 }
 
 
@@ -52,15 +56,17 @@ impl FlowProcessor {
         source_name: String, 
         // base_dir: String,
         rx: channel::Receiver<FlowMessage>,
-        flow_writer: Option<FlowWriter>,
+        tx: channel::Sender<StatsMessage>,
+        // flow_writer: Option<FlowWriter>,
     ) -> Result<FlowProcessor, std::io::Error> {
 
         let fp = FlowProcessor {
             source_name : source_name.to_string(),
             // base_dir    : base_dir.to_string(),
             rx          : rx,
+            tx          : tx,
             parser      : FlowInfoCodec::default(),
-            flow_writer  : flow_writer,
+            // flow_writer : flow_writer,
         };
 
         return Ok(fp);
@@ -72,11 +78,11 @@ impl FlowProcessor {
         for msg in self.rx.clone().iter() {
             match msg {
                 FlowMessage::Command(cmd) => {
-                    if cmd.starts_with("flush") {
-                        debug!("Received command: {}", cmd.clone());
-                        if let Some(fw) = self.flow_writer.as_mut() {
-                            fw.rotate_tick(true);
-                        }
+                    if cmd.starts_with("tick") {
+                        // debug!("Received rotation timer tick");
+                        // if let Some(fw) = self.flow_writer.as_mut() {
+                        //     fw.rotate_tick(true);
+                        // }
                     } else {
                         println!("received command: {}", cmd);
                     }
@@ -106,59 +112,14 @@ impl FlowProcessor {
                 }
             }
         }
-        // loop {
-        //     match self.rx.recv().await {
-        //         Some(msg) => {
-        //             match msg {
-        //                 FlowMessage::Command(cmd) => {
-        //                     if cmd.starts_with("flush") {
-        //                         debug!("Received command: {}", cmd.clone());
-        //                         let mut parts = cmd.split_whitespace();
-        //                         if let Some(fw) = self.flow_writer.as_mut() {
-        //                             fw.rotate(parts.nth(1).unwrap());
-        //                         }
-        //                     } else {
-        //                         println!("received command: {}", cmd);
-        //                     }
-        //                 }
-        //                 FlowMessage::Datagram(udp) => {
-        //                     let mut bm_buf = BytesMut::with_capacity(0);
-        //                     bm_buf.extend_from_slice(&udp);
-                    
-        //                     let result = self.parser.decode(&mut bm_buf);
-                    
-        //                     match result {
-        //                         Ok(Some(pkt)) => {
-        //                             match pkt {
-        //                                 NetFlowV9(v9pkt) => {
-        //                                     self.process_v9packet(v9pkt).await;
-        //                                 }
-        //                                 _ => () // ignore everything else (IPFIX)
-        //                             }
-        //                         }
-        //                         Ok(None) => {
-        //                             debug!("Ok(None) from parser.decode");
-        //                         },
-        //                         Err(error) => {
-        //                             error!("Error decoding flow packet: {:?}",error);
-        //                         }
-        //                     }
-        //                 }
-        //             }
-        //         }
-        //         None => {
-        //             break;
-        //         }
-        //     }
-
-        // };
 
         info!("flowprocessor '{}' exiting gracefully", self.source_name);
-        if let Some(fw) = self.flow_writer.as_mut() {
-            // fw.close_current();
-            fw.rotate_tick(false);
-        }
-
+        // if let Some(fw) = self.flow_writer.as_mut() {
+        //     // fw.close_current();
+        //     fw.rotate_tick(false);
+        // }
+        // info!("Waiting a few seconds for cleaning up");
+        // thread::sleep(time::Duration::from_millis(3000));
     }
 
     fn process_v9packet(&mut self, v9pkt: NetFlowV9Packet) {
@@ -268,10 +229,10 @@ impl FlowProcessor {
 
 
     pub fn push(&mut self, flow: FlowStats) {
-
-        if let Some(fw) = self.flow_writer.as_mut() {
-            fw.push(flow.clone());
-        }
+        self.tx.send(StatsMessage::Stats(flow)).unwrap();
+        // if let Some(fw) = self.flow_writer.as_mut() {
+        //     fw.push(flow.clone());
+        // }
     }
 
 

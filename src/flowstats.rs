@@ -9,6 +9,13 @@ use arrow::datatypes::DataType::*;
 // use serde::{Deserialize, Serialize};
 // use clickhouse::Row;
 
+
+#[derive(Debug, Clone)]
+pub enum StatsMessage {
+    Command(String),
+    Stats(FlowStats),
+}
+
 #[derive(Default, Debug, Clone)]
 pub struct FlowStats {
     pub ts      : Option<i64>,

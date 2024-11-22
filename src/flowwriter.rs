@@ -2,13 +2,14 @@ use std::sync::Arc;
 use std::fs::File;
 use arrow::datatypes::*;
 use arrow::array::*;
+use crossbeam::channel;
 use parquet::{
     basic::{Compression, Encoding},
     file::properties::*,
     arrow::ArrowWriter,
 };
 use chrono::*;
-use tracing::{debug, error};
+use tracing::{info, debug, error};
 use std::process::Command;
 
 use crate::flowstats::*;
@@ -16,7 +17,7 @@ use crate::flowstats::*;
 
 #[derive(Debug)]
 pub struct FlowWriter {
-    source_name : String, 
+    rx          : channel::Receiver<StatsMessage>,
     base_dir    : String,
     schema      : Schema,           // Schema of the parquet file
     writer      : ArrowWriter<std::fs::File>,
@@ -35,18 +36,18 @@ pub struct FlowWriter {
 
 impl FlowWriter {
     pub fn new(
-        source_name : String, 
+        rx          : channel::Receiver<StatsMessage>,
         base_dir    : String,
         ch_db_table : Option<String>,   // DB and table to write to (if any)
         ch_ttl      : u64,              // TTL to set for the table (0 if none)
         ch_host     : Option<String>,   // CH Host to use (localhost if None)
         ch_user     : Option<String>,   // CH Username (default if None)
         ch_pwd      : Option<String>,   // CH Password (or None)
-        ) -> Result<FlowWriter, std::io::Error>
+        ) -> FlowWriter
     {
         let fields = FlowStats::create_fields();
         let schema = Schema::new(fields.clone());
-        let filename = format!("{}/{}.current.parquet", base_dir, source_name);
+        let filename = format!("{}/flows.current.parquet", base_dir);
         let props = WriterProperties::builder()
         .set_writer_version(WriterVersion::PARQUET_2_0)
         .set_encoding(Encoding::PLAIN)
@@ -55,21 +56,14 @@ impl FlowWriter {
     // .set_column_encoding(ColumnPath::from("col1"), Encoding::DELTA_BINARY_PACKED)
     
         // eprintln!("Trying to open file {}", filename);
-        let file =  match File::create(filename.clone()) {
-            Ok(file) => file,
-            Err(error) =>
-            {
-                error!("Could not open file: {}", filename.clone());
-                return Err(error);
-            }
-        };
+        let file =  File::create(filename.clone()).unwrap();
 
         let writer = 
             ArrowWriter::try_new(file, Arc::new(schema.clone()), Some(props))
             .expect("Error opening parquet file");
    
         let mut fw = FlowWriter {
-            source_name : source_name.to_string(),
+            rx          : rx,
             base_dir    : base_dir.to_string(),
             schema      : schema.clone(),
             writer      : writer,
@@ -87,10 +81,36 @@ impl FlowWriter {
             fw.create_db_and_table();
         }
 
-        return Ok(fw);
+        return fw;
     }
 
-    pub fn push(&mut self, flow: FlowStats) {
+    pub fn start(&mut self) {
+                // Listen to rx, 
+        // check each message if it contains command or received datagram
+        for msg in self.rx.clone().iter() {
+            match msg {
+                StatsMessage::Command(cmd) => {
+                    if cmd.starts_with("tick") {
+                        self.rotate_tick(true);
+                        // debug!("Received rotation timer tick");
+                        // if let Some(fw) = self.flow_writer.as_mut() {
+                        //     fw.rotate_tick(true);
+                        // }
+                    } else {
+                        println!("received command: {}", cmd);
+                    }
+                }
+                StatsMessage::Stats(flow) => {
+                    self.push(flow);
+                }
+            }
+        }
+
+        info!("flowwriter '{}' exiting gracefully", self.base_dir.clone());
+
+    }
+
+    fn push(&mut self, flow: FlowStats) {
 
         self.flows.push(flow);
 
@@ -104,7 +124,7 @@ impl FlowWriter {
 
     fn write_batch(&mut self) {
         let batch = self.record_batch();
-        debug!("Writing batch ('{}' - {} flows)", self.source_name, batch.num_rows());
+        debug!("Writing batch ({} flows)", batch.num_rows());
         self.writer.write(&batch).unwrap();
         self.flows = Vec::new();
     }
@@ -117,19 +137,20 @@ impl FlowWriter {
         let _ = self.writer.flush();
         match self.writer.finish() {
             Err(error) => {
-                error!("Error closing writer for '{}' - {:?}", self.source_name, error);
+                error!("Error closing writer : {:?}", error);
             }
             _ => {
-                debug!("Closed writer for '{}'", self.source_name);
+                debug!("Closed writer");
             }
         }
     }
 
-    pub fn rotate_tick(&mut self, open_new: bool) {
+    fn rotate_tick(&mut self, open_new: bool) {
 
+        debug!("FlowWriter tick");
         if !open_new {  // Not opening a new one means we're shutting down
-            self.rotate(open_new);
-            return;
+            // set rotations to zero, so we're sure to flush
+            self.rotations = 0;
         }
 
         // If we have had more than 2 rotations between ticks: no need to force
@@ -148,10 +169,10 @@ impl FlowWriter {
         // Close current, rename, open new
         self.close_current();
         let loc_now: DateTime<Local> = Local::now();
-        debug!(" -> {}",loc_now.format("%Y-%m-%d %H:%M:%S%.6f"));
-        let filename = format!("{}/{}.current.parquet", self.base_dir.clone(), self.source_name.clone());
+        debug!(" -> {}",loc_now.format("%Y-%m-%d-%H:%M:%S%.6f"));
+        let filename = format!("{}/flows.current.parquet", self.base_dir.clone());
         // Rename to naming scheme
-        let to_file = format!("{}/{}-{}.parquet", self.base_dir.clone(), self.source_name.clone(), loc_now.format("%Y-%m-%d %H:%M:%S%.6f"));
+        let to_file = format!("{}/flows-{}.parquet", self.base_dir.clone(), loc_now.format("%Y-%m-%d-%H:%M:%S%.6f"));
         debug!("rename {} -> {}", filename.clone(), to_file.clone());
         std::fs::rename(filename.clone(), to_file.clone()).unwrap();
         // Create new one if requested
@@ -177,6 +198,10 @@ impl FlowWriter {
                 self.ch_db_table.as_ref().clone().unwrap(),
                 to_file.clone());
             self.ch_query(query);
+
+            // If we insert into CH, then we delete the file afterwards
+            std::fs::remove_file(to_file.clone()).unwrap();
+
         }
 
     }
@@ -282,18 +307,19 @@ impl FlowWriter {
     
 
         // let output = match cmd.output() {
-        let output = match cmd.spawn().expect("Error insert").wait_with_output() {
+        let _output = match cmd.spawn().expect("Error insert").wait_with_output() {
             Err(e) => debug!("{:?}", e),
-            Ok(output) => {
-                if output.status.success() {
-                    debug!("stdout: {:?}", String::from_utf8(output.stdout) );
-                    debug!("stderr: {:?}", String::from_utf8(output.stderr) );
-                } else {
-                    debug!("Process failed: {:?}", String::from_utf8(output.stderr) );
-                }
+            Ok(_output) => {
+                debug!("OK");
+                // if output.status.success() {
+                //     debug!("stdout: {:?}", String::from_utf8(output.stdout) );
+                //     debug!("stderr: {:?}", String::from_utf8(output.stderr) );
+                // } else {
+                //     debug!("Process failed: {:?}", String::from_utf8(output.stderr) );
+                // }
             }
         };
-        debug!("{:#?}", output);
+        // debug!("{:#?}", output);
     }
     
     fn create_db_and_table(&mut self) {
