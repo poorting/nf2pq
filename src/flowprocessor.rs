@@ -78,13 +78,11 @@ impl FlowProcessor {
         for msg in self.rx.clone().iter() {
             match msg {
                 FlowMessage::Command(cmd) => {
-                    if cmd.starts_with("tick") {
-                        // debug!("Received rotation timer tick");
-                        // if let Some(fw) = self.flow_writer.as_mut() {
-                        //     fw.rotate_tick(true);
-                        // }
+                    if cmd.starts_with("quit") {
+                        debug!("flowprocessor '{}' received quit command", self.source_name.clone());
+                        break;
                     } else {
-                        println!("received command: {}", cmd);
+                        debug!("received command: {}", cmd);
                     }
                 }
                 FlowMessage::Datagram(udp) => {
