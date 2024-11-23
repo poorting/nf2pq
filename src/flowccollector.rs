@@ -1,13 +1,10 @@
 use std::{net::UdpSocket, str::*};
 use std::net::IpAddr;
-// use tokio::net::UdpSocket;
 use anyhow::Error;
 use crossbeam::channel;
 use tracing::{instrument, info, error};
 
 use crate::flowprocessor::*;
-
-// pub mod flowstats;
 
 // #[derive(Debug)]
 pub struct FlowCollector {
