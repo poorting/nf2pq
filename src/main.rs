@@ -137,8 +137,6 @@ fn main() {
     let (fw_tx, fw_rx) = unbounded::<StatsMessage>();
 
     // 11111111111111111111111111111111111111111111111111111111111111111111111
-    // message channel between main and collector
-    // let (tx, rx) = unbounded::<String>();
     // message channel between collector and processor
     let (fp_tx, fp_rx) = unbounded::<FlowMessage>();
     let collector_result = FlowCollector::new(
@@ -179,44 +177,45 @@ fn main() {
     }
 
     // // 2222222222222222222222222222222222222222222222222222222222222222222222222
-    // // message channel between main and collector
-    // let (tx, rx) = unbounded_channel::<String>();
-    // // message channel between collector and processor
-    // let (fp_tx, fp_rx) = unbounded::<FlowMessage>();
-    // let fc_thread = thread::spawn(move || {
-    //     let rt = tokio::runtime::Builder::new_multi_thread()
-    //         .enable_all()
-    //         .worker_threads(1)
-    //         .build()
-    //         .unwrap();
-    //     let mut collector = FlowCollector::new(
-    //         // "192.168.0.7".to_string(), 
-    //         None,
-    //         "second".to_string(), 
-    //         9996, 
-    //         rx,
-    //         fp_tx ).unwrap();
+    // message channel between collector and processor
+    let (fp_tx, fp_rx) = unbounded::<FlowMessage>();
+    let collector_result = FlowCollector::new(
+        // "192.168.0.7".to_string(), 
+        None,
+        "second".to_string(), 
+        9996, 
+        fp_tx.clone());
+    match collector_result {
+        Ok(mut collector) => {
+            let fc_thread = thread::spawn(move || {
+                collector.start();
+            });
+            fc_threads.push(fc_thread);
+        }
+        Err( _ ) => {
+            info!("Failed to create flow collector, exiting");
+            exit(1);
+        }
+    }
+    fp_txs.push(fp_tx);
 
-    //         rt.block_on( async {collector.start().await;});
-    // });
-    // fc_threads.push(fc_thread);
-    // fc_txs.push(tx);
-    // let processor_result = FlowProcessor::new(
-    //     "second".to_string(), 
-    //     fp_rx,
-    //     fw_tx.clone());
-    // match processor_result {
-    //     Ok(mut processor) => {
-    //         let fp_thread = thread::spawn(move || {
-    //             processor.start();
-    //             });
-    //         fp_threads.push(fp_thread);
-    //     }
-    //     Err( _ ) => {
-    //         info!("Exiting due to error(s)");
-    //         exit(1);
-    //     },
-    // }
+    let processor_result = FlowProcessor::new(
+        "second".to_string(), 
+        fp_rx,
+        fw_tx.clone());
+    match processor_result {
+        Ok(mut processor) => {
+            let fp_thread = thread::spawn(move || {
+                processor.start();
+                });
+            fp_threads.push(fp_thread);
+        }
+        Err( _ ) => {
+            info!("Failed to create flow processor, exiting");
+            exit(1);
+        },
+    }
+
     // -----------------------------------------------------------------------
 
     // Now create the one flow writer
