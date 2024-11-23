@@ -106,6 +106,7 @@ impl FlowWriter {
         }
 
         info!("flowwriter '{}' exiting gracefully", self.base_dir.clone());
+        self.rotate_tick(false);
 
     }
 
@@ -114,7 +115,9 @@ impl FlowWriter {
         self.flows.push(flow);
 
         if self.flows.len() >= 250_000 {
-            debug!("Buffer full. Rotating.");
+            let delta: f64 = self.last_rot.elapsed().as_millis() as f64;
+            // delta = delta / 1000.0;
+            debug!("Buffer threshold reached. Rotating. {:.1} kflows/s", 250000.0/delta);
             // self.write_batch();
             self.rotate(true);
         }
@@ -144,7 +147,7 @@ impl FlowWriter {
 
     fn rotate_tick(&mut self, open_new: bool) {
 
-        debug!("FlowWriter tick ({:?})", self.last_rot.elapsed() );
+        debug!("flowwriter tick ({:?})", self.last_rot.elapsed() );
 
         if self.last_rot.elapsed() > Duration::from_secs(2) || !open_new {
             if self.flows.len() > 0 {

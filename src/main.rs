@@ -1,18 +1,17 @@
+use std::net::UdpSocket;
 use std::process::exit;
 use std::env::temp_dir;
 use clap::Parser;
 use flowstats::StatsMessage;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use std::time::{Duration, SystemTime};
 use flowprocessor::{FlowMessage, FlowProcessor};
 use signal_hook::consts::{SIGABRT, SIGINT};
 use signal_hook::iterator::Signals;
-// use chrono::*;
 use flowccollector::FlowCollector;
 use tracing::level_filters::LevelFilter;
 use std::thread;
 use std::sync::Once;
-use crossbeam::channel::unbounded;
+use crossbeam::channel::{unbounded, Sender};
 use tracing::{instrument, info, debug, error};
 use configparser::ini::Ini;
 
@@ -58,9 +57,9 @@ fn get_next_timer(minutes:u64) -> Duration {
     next_ts
 }
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 5)]
-#[instrument]
-async fn main() {
+// #[tokio::main(flavor = "multi_thread", worker_threads = 5)]
+// #[instrument]
+fn main() {
 
     let args = Args::parse();
 
@@ -128,7 +127,7 @@ async fn main() {
     // the flow stats and writes then to parquet files on disk
     // and optionally pushes those to clickhouse
     let mut fc_threads = Vec::new();
-    let mut fc_txs: Vec<UnboundedSender<String>> = Vec::new();
+    let mut fp_txs: Vec<Sender<FlowMessage>> = Vec::new();
     let mut fp_threads = Vec::new();
     
     // Create all flow collectors and processors (start with only one pair)
@@ -136,28 +135,28 @@ async fn main() {
     let (fw_tx, fw_rx) = unbounded::<StatsMessage>();
 
     // 11111111111111111111111111111111111111111111111111111111111111111111111
-    // message channel between main and collector
-    let (tx, rx) = unbounded_channel::<String>();
     // message channel between collector and processor
     let (fp_tx, fp_rx) = unbounded::<FlowMessage>();
-    let fc_thread = thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .worker_threads(1)
-            .build()
-            .unwrap();
-        let mut collector = FlowCollector::new(
-            // "192.168.0.7".to_string(), 
-            None,
-            "first".to_string(), 
-            9995, 
-            rx,
-            fp_tx ).unwrap();
+    let collector_result = FlowCollector::new(
+        // "192.168.0.7".to_string(), 
+        None,
+        "first".to_string(), 
+        9995, 
+        fp_tx.clone());
+    match collector_result {
+        Ok(mut collector) => {
+            let fc_thread = thread::spawn(move || {
+                collector.start();
+            });
+            fc_threads.push(fc_thread);
+        }
+        Err( _ ) => {
+            info!("Failed to create flow collector, exiting");
+            exit(1);
+        }
+    }
+    fp_txs.push(fp_tx);
 
-            rt.block_on( async {collector.start().await;});
-    });
-    fc_threads.push(fc_thread);
-    fc_txs.push(tx);
     let processor_result = FlowProcessor::new(
         "first".to_string(), 
         fp_rx,
@@ -170,34 +169,34 @@ async fn main() {
             fp_threads.push(fp_thread);
         }
         Err( _ ) => {
-            info!("Exiting due to error(s)");
+            info!("Failed to create flow processor, exiting");
             exit(1);
         },
     }
 
-    // 2222222222222222222222222222222222222222222222222222222222222222222222222
-    // message channel between main and collector
-    let (tx, rx) = unbounded_channel::<String>();
+    // // 2222222222222222222222222222222222222222222222222222222222222222222222222
     // message channel between collector and processor
     let (fp_tx, fp_rx) = unbounded::<FlowMessage>();
-    let fc_thread = thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .worker_threads(1)
-            .build()
-            .unwrap();
-        let mut collector = FlowCollector::new(
-            // "192.168.0.7".to_string(), 
-            None,
-            "second".to_string(), 
-            9996, 
-            rx,
-            fp_tx ).unwrap();
+    let collector_result = FlowCollector::new(
+        // "192.168.0.7".to_string(), 
+        None,
+        "second".to_string(), 
+        9996, 
+        fp_tx.clone());
+    match collector_result {
+        Ok(mut collector) => {
+            let fc_thread = thread::spawn(move || {
+                collector.start();
+            });
+            fc_threads.push(fc_thread);
+        }
+        Err( _ ) => {
+            info!("Failed to create flow collector, exiting");
+            exit(1);
+        }
+    }
+    fp_txs.push(fp_tx);
 
-            rt.block_on( async {collector.start().await;});
-    });
-    fc_threads.push(fc_thread);
-    fc_txs.push(tx);
     let processor_result = FlowProcessor::new(
         "second".to_string(), 
         fp_rx,
@@ -210,10 +209,11 @@ async fn main() {
             fp_threads.push(fp_thread);
         }
         Err( _ ) => {
-            info!("Exiting due to error(s)");
+            info!("Failed to create flow processor, exiting");
             exit(1);
         },
     }
+
     // -----------------------------------------------------------------------
 
     // Now create the one flow writer
@@ -256,8 +256,36 @@ async fn main() {
         thread::sleep(Duration::from_millis(100));
     }
 
-    for tx in fc_txs {
+    for tx in fp_txs {
+        tx.send(FlowMessage::Command("quit".to_string())).unwrap();
         drop(tx);
+    }
+
+    // wait for the processor threads to exit cleanly
+    for fp_thread in fp_threads {
+        match fp_thread.join() {
+            Ok(_) => (),
+            Err(err) => {
+                error!("{:#?}", err);
+            }
+        }
+    }
+    debug!("All flow processors have stopped");
+
+    // At this point all channels between collector(s) and
+    // processor(s) have closed. Collector(s) will stop
+    // when they notice this, but may wait endlessly 
+    // for a UDP packet to arrive. So we send one to each
+    let socket_r = UdpSocket::bind("127.0.0.1:0");
+    match socket_r {
+        Ok(socket) => {
+            let message = String::from("quit").into_bytes();
+            let _ = socket.send_to(&message, "127.0.0.1:9995");
+            let _ = socket.send_to(&message, "127.0.0.1:9996");
+        }
+        Err(e) => {
+            error!("Could not create UDP socket - {:?}", e);
+        }
     }
 
     // wait for the collector threads to exit cleanly
@@ -271,16 +299,6 @@ async fn main() {
     }
     debug!("All flow collectors have stopped");
 
-    // wait for the processor threads to exit cleanly
-    for fp_thread in fp_threads {
-        match fp_thread.join() {
-            Ok(_) => (),
-            Err(err) => {
-                error!("{:#?}", err);
-            }
-        }
-    }
-    debug!("All flow processors have stopped");
 
     // finally drop flowwriter channel and wait for the flowwriter thread to finish
     drop(fw_tx);

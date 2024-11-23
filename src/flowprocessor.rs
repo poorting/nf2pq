@@ -1,18 +1,7 @@
-// use core::time;
 use std::fmt::Debug;
-// use std::thread;
-// use arrow::ipc::DurationArgs;
-// use std::sync::Arc;
-// use std::fs::File;
 use bytes::BytesMut;
-// use arrow::datatypes::*;
 use netgauze_flow_pkt::netflow::NetFlowV9Packet;
 use tokio_util::codec::Decoder;
-// use parquet::{
-//     basic::{Compression, Encoding},
-//     file::properties::*,
-//     arrow::ArrowWriter,
-// };
 use netgauze_flow_pkt::{
     codec::FlowInfoCodec, 
     netflow::Set,
@@ -20,13 +9,10 @@ use netgauze_flow_pkt::{
     ie::Field::*,
     ie::protocolIdentifier,
 };
-// use serde::{Deserialize, Serialize};
 use crossbeam::channel::{self};
 use tracing::{info, debug, error};
-// use clickhouse::{Client, inserter, Row};
 
 use crate::flowstats::*;
-// use crate::flowwriter::*;
 
 // Exchange of information between collector and processor
 // can contain message (e.g. rotate flow file) or received datagram
@@ -78,13 +64,11 @@ impl FlowProcessor {
         for msg in self.rx.clone().iter() {
             match msg {
                 FlowMessage::Command(cmd) => {
-                    if cmd.starts_with("tick") {
-                        // debug!("Received rotation timer tick");
-                        // if let Some(fw) = self.flow_writer.as_mut() {
-                        //     fw.rotate_tick(true);
-                        // }
+                    if cmd.starts_with("quit") {
+                        debug!("flowprocessor '{}' received quit command", self.source_name.clone());
+                        break;
                     } else {
-                        println!("received command: {}", cmd);
+                        debug!("received command: {}", cmd);
                     }
                 }
                 FlowMessage::Datagram(udp) => {
