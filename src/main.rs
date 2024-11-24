@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime};
 use flowprocessor::{FlowMessage, FlowProcessor};
 use signal_hook::consts::{SIGABRT, SIGINT};
 use signal_hook::iterator::Signals;
-use flowccollector::FlowCollector;
+use flowcollector::FlowCollector;
 use tracing::level_filters::LevelFilter;
 use std::thread;
 use std::sync::Once;
