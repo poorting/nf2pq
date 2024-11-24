@@ -189,6 +189,7 @@ fn main() {
         None => (),
     }
 
+    // See if we need to create a default collector
     if config.collectors.len() == 0 {
         // create a default flow collector
         let mut collector = CollectorConfig::default();
@@ -199,7 +200,7 @@ fn main() {
 
     debug!("CONFIG\n{:#?}", config);
 
-    // createw signal handler to handle Ctrl+C and SIGABRT
+    // create a signal handler to handle Ctrl+C and SIGABRT
     let mut signals = Signals::new([SIGINT, SIGABRT]).unwrap();
     thread::spawn(move || {
         for sig in signals.forever() {
@@ -212,20 +213,21 @@ fn main() {
         }
     });
 
-    // Create a channel for each flow collector (from main to fc).
-    // Each fc creates a channel between it and the processing thread
+    // Create a channel for each flow collector (from fc to fp).
+    // Each fc has a channel between it and its processing thread
     // to get the UDP datagrams out of the receiving buffer ASAP.
-    // The final step is a flow writer thread that collects
-    // the flow stats and writes then to parquet files on disk
-    // and optionally pushes those to clickhouse
+    // The final step is a (single) flow writer thread that collects
+    // the flow stats of each processor and writes then to parquet 
+    // files on disk and optionally pushes those to clickhouse
     let mut fc_threads = Vec::new();
     let mut fp_txs: Vec<Sender<FlowMessage>> = Vec::new();
     let mut fp_threads = Vec::new();
     
-    // Create all flow collectors and processors (start with only one pair)
     // message channel between processor(s) and writer
+    // each processor gets a clone of the Sender
     let (fw_tx, fw_rx) = unbounded::<StatsMessage>();
 
+    // Create all flow collectors and processors
     for flowsource in &config.collectors {
         // message channel between collector and processor
         let (fp_tx, fp_rx) = unbounded::<FlowMessage>();
@@ -296,13 +298,15 @@ fn main() {
         }
         // check if we received a SIGINT/SIGABRT signal
         if STOP.is_completed() {
-            // No need to send quit command
-            // dropping of channels will take care of that
             break;
         }
         thread::sleep(Duration::from_millis(100));
     }
 
+    // Send a quit command to each processor
+    // This will cause them to stop and exit
+    // Which the flow writer will pick up on
+    // because of the closed channel
     for tx in fp_txs {
         tx.send(FlowMessage::Command("quit".to_string())).unwrap();
         drop(tx);
@@ -323,6 +327,8 @@ fn main() {
     // processor(s) have closed. Collector(s) will stop
     // when they notice this, but may wait endlessly 
     // for a UDP packet to arrive. So we send one to each
+    // Since sending it to a processor will fail (and lead to exit),
+    // it doesn't really matter what we send. It is just a wake-up packet
     let socket_r = UdpSocket::bind("127.0.0.1:0");
     match socket_r {
         Ok(socket) => {
@@ -348,7 +354,8 @@ fn main() {
     debug!("All flow collectors have stopped");
 
 
-    // finally drop flowwriter channel and wait for the flowwriter thread to finish
+    // finally drop last reference to flowwriter channel
+    // and wait for the flowwriter thread to finish
     drop(fw_tx);
     match fw_thread.join() {
         Ok(_) => (),
@@ -358,6 +365,7 @@ fn main() {
     }
     debug!("Flow writer has stopped");
 
+    // We can now exit cleanly
     info!("Exit nf2ch");
 
 }
