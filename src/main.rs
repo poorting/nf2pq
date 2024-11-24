@@ -77,12 +77,12 @@ fn get_next_timer(minutes:u64) -> Duration {
     next_ts
 }
 
-fn parse_config(config_file: String) -> MainConfig {
+fn parse_config(config_file: String) -> Option<MainConfig> {
 
     let mut cfg = MainConfig::default();
+    let mut retcfg:Option<MainConfig> = None;
     let mut config = Ini::new();
     let map = config.load(config_file);
-    println!("{:?}", map.clone());
     let mut port_def = 9995;
     match map {
         Ok(items) => {
@@ -123,11 +123,12 @@ fn parse_config(config_file: String) -> MainConfig {
                     cfg.collectors.push(collector);
                 }
             }
+            retcfg = Some(cfg);
         }
-        _ => (),
+        Err(e) => eprintln!("Could not load config: {:?}", e),
     }
 
-    cfg
+    retcfg
 }
 
 fn main() {
@@ -143,7 +144,10 @@ fn main() {
 
     match args.config {
         Some(conf_file) => {
-            config = parse_config(conf_file);
+            match parse_config(conf_file) {
+                Some(cfg) => config = cfg,
+                None => (),
+            }
         }
         _ => {},
     }

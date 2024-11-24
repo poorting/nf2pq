@@ -65,8 +65,8 @@ impl FlowStats {
         fields.push(Field::new("smk", UInt8, true));
         fields.push(Field::new("dmk", UInt8, true));
         fields.push(Field::new("ra", Utf8, true));
-        fields.push(Field::new("inif", UInt16, true));
-        fields.push(Field::new("outif", UInt16, true));
+        fields.push(Field::new("in", UInt16, true));
+        fields.push(Field::new("out", UInt16, true));
         fields.push(Field::new("sas", UInt32, true));
         fields.push(Field::new("das", UInt32, true));
         fields.push(Field::new("exid", UInt16, true));

@@ -258,29 +258,6 @@ impl FlowWriter {
 
     }
 
-    // fn ch_insert(&mut self, filename: String) {
-    //     debug!("CH insert: {}", filename.clone());
-
-    //     let query = format!("INSERT INTO {} FORMAT Parquet", self.ch_db_table.as_ref().clone().unwrap());
-
-    //     let mut cmd = Command::new("clickhouse-client");
-    //     // if self.username.is_some() ...
-    //     if self.ch_host.is_some() {
-    //         cmd.arg("--host");
-    //         cmd.arg(self.ch_host.as_ref().unwrap().clone());
-    //     }
-    //     if self.ch_user.is_some() {
-    //         cmd.arg("--user");
-    //         cmd.arg(self.ch_user.as_ref().unwrap().clone());
-    //     }
-    //     if self.ch_pwd.is_some() {
-    //         cmd.arg("--password");
-    //         cmd.arg(self.ch_pwd.as_ref().unwrap().clone());
-    //     }
-    //     cmd.arg("--query");
-    //     cmd.arg(query);
-    // }
-
     fn ch_query(&mut self, query: String) {
 
         debug!("CH query: {}", query.clone());
@@ -308,12 +285,6 @@ impl FlowWriter {
             Err(e) => debug!("{:?}", e),
             Ok(_output) => {
                 debug!("OK");
-                // if output.status.success() {
-                //     debug!("stdout: {:?}", String::from_utf8(output.stdout) );
-                //     debug!("stderr: {:?}", String::from_utf8(output.stderr) );
-                // } else {
-                //     debug!("Process failed: {:?}", String::from_utf8(output.stderr) );
-                // }
             }
         };
         // debug!("{:#?}", output);
@@ -343,8 +314,8 @@ impl FlowWriter {
                 `smk` UInt8,
                 `dmk` UInt8,
                 `ra` LowCardinality(String),
-                `inif` UInt16 DEFAULT 0,
-                `outif` UInt16 DEFAULT 0,
+                `in` UInt16 DEFAULT 0,
+                `out` UInt16 DEFAULT 0,
                 `sas` UInt32 DEFAULT 0,
                 `das` UInt32 DEFAULT 0,
                 `exid` UInt16 DEFAULT 0,
