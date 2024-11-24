@@ -12,7 +12,8 @@ use tracing::level_filters::LevelFilter;
 use std::thread;
 use std::sync::Once;
 use crossbeam::channel::{unbounded, Sender};
-use tracing::{instrument, info, debug, error};
+use tracing::{info, debug, error};
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use configparser::ini::Ini;
 
 pub mod flowprocessor;
@@ -25,6 +26,28 @@ pub mod flowwriter;
 // Can be tested by the main loop to see if we need to exit
 static STOP: Once = Once::new();
 
+#[derive(Debug, Default)]
+pub struct CollectorConfig {
+    pub port:u16,
+    pub name:String,
+    pub exporter_ip:Option<String>,
+}
+
+#[derive(Debug, Default)]
+pub struct MainConfig {
+    pub db_table: Option<String>,
+    pub ttl: u64,
+    pub ch_host: Option<String>,
+    pub ch_user: Option<String>,
+    pub ch_pwd: Option<String>,
+    pub threshold: u64,
+    pub datadir: String,
+    pub rotation: u64,
+    pub logdir: Option<String>,
+    pub collectors: Vec<CollectorConfig>,
+}
+
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -33,12 +56,12 @@ struct Args {
     config: Option<String>,
 
     /// Directory where parquet files are stored
-    #[arg(short, long, value_name = "OUTPUT DIRECTORY", default_value_t=temp_dir().display().to_string() )]
-    directory: String,
+    #[arg(short, long, value_name = "OUTPUT DIRECTORY")]
+    directory: Option<String>,
 
     /// Time between rotation of parquet output
-    #[arg(short, long, value_name = "MINUTES", default_value("5"))]
-    rotation: u64,
+    #[arg(short, long, value_name = "MINUTES")]
+    rotation: Option<u64>,
 
     /// Set logging to debug level
     #[arg(long, default_value("false"))]
@@ -46,66 +69,131 @@ struct Args {
     
 }
 
-#[instrument]
 fn get_next_timer(minutes:u64) -> Duration {
-    let secs: u64 = minutes;
+    let secs: u64 = minutes * 60;
     let now_ts = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
     let next_ts:Duration = Duration::new((u64::from( now_ts.as_secs() / secs)+1)*secs , 0);
-    // let next_dt:DateTime<Local> = Utc.timestamp_opt(next_ts.as_secs() as i64, 0).unwrap().into();
-    // let next_dt_str = next_dt.format("%Y%m%d%H%M").to_string();
     
     next_ts
 }
 
-// #[tokio::main(flavor = "multi_thread", worker_threads = 5)]
-// #[instrument]
+fn parse_config(config_file: String) -> MainConfig {
+
+    let mut cfg = MainConfig::default();
+    let mut config = Ini::new();
+    let map = config.load(config_file);
+    println!("{:?}", map.clone());
+    let mut port_def = 9995;
+    match map {
+        Ok(items) => {
+            for section in items.keys() {
+                if section == "default" {
+                    cfg.logdir = config.get(section, "logdir");
+                    cfg.db_table = config.get(section, "db_table");
+                    match config.get(section, "datadir") {
+                        Some(datadir) => cfg.datadir = datadir,
+                        None => cfg.datadir = temp_dir().display().to_string(),
+                    }
+                    match config.getuint(section, "rotation").unwrap() {
+                        Some(rotation) => cfg.rotation = rotation,
+                        None => cfg.rotation = 5,
+                    }
+                    match config.getuint(section, "ttl").unwrap() {
+                        Some(ttl) => cfg.ttl = ttl,
+                        None => cfg.ttl = 0,
+                    }
+                    match config.getuint(section, "threshold").unwrap() {
+                        Some(threshold) => cfg.threshold = threshold,
+                        None => cfg.threshold = 250,
+                    }
+                    cfg.ch_host = config.get(section, "ch_host");
+                    cfg.ch_user = config.get(section, "ch_user");
+                    cfg.ch_pwd = config.get(section, "ch_pwd");
+                } else {
+                    let mut collector = CollectorConfig::default();
+                    collector.name = section.clone();
+                    match config.getuint(section, "port").unwrap() {
+                        Some(port) => collector.port = port as u16,
+                        None => {
+                            collector.port = port_def;
+                            port_def += 1;
+                        }
+                    }
+                    collector.exporter_ip = config.get(section, "exporter_ip");
+                    cfg.collectors.push(collector);
+                }
+            }
+        }
+        _ => (),
+    }
+
+    cfg
+}
+
 fn main() {
 
     let args = Args::parse();
+    println!("{:?}", args);
 
-    println!("arguments: {:?}", args);
-    println!("temp dir: {}", temp_dir().display().to_string() );
+     // Read config file if provided
+    let mut config = MainConfig::default();
+    config.datadir  = temp_dir().display().to_string();
+    config.rotation = 5;
+    config.threshold = 250;
 
-    let logfile = std::io::stderr();
-    // let logfile = RollingFileAppender::builder()
-    //     .rotation(Rotation::DAILY) // rotate log files once per day
-    //     .filename_prefix("nf2ch") // log files will have names like "mywebservice.logging.2024-01-09"
-    //     .filename_suffix("log")
-    //     .max_log_files(7) // the number of log files to retain
-    //     .build(".") // write log files to the '/var/log/mywebservice' directory
-    //     .expect("failed to initialize rolling file appender");
+    match args.config {
+        Some(conf_file) => {
+            config = parse_config(conf_file);
+        }
+        _ => {},
+    }
+
+    let (non_blocking, _guard) = match config.logdir.clone() {
+        Some(logdir) => {
+            let logfile = RollingFileAppender::builder()
+                .rotation(Rotation::DAILY) // rotate log files once per day
+                .filename_prefix("nf2pq") // log files will have names like "mywebservice.logging.2024-01-09"
+                .filename_suffix("log")
+                .max_log_files(7) // the number of log files to retain
+                .build(logdir) // write log files to the '/var/log/mywebservice' directory
+                .expect("failed to initialize rolling file appender");
+            tracing_appender::non_blocking(logfile)
+        }
+        None => {
+            tracing_appender::non_blocking(std::io::stderr())
+        }
+    };
 
     let mut level = LevelFilter::INFO;
     if args.debug {
         level = LevelFilter::DEBUG
     }
-    let (non_blocking, _guard) = tracing_appender::non_blocking(logfile);
+
     tracing_subscriber::fmt()
         .with_writer(non_blocking)
         .with_max_level(level)
         .init();
 
-    // Read config file if provided
-    match args.config {
-        Some(conf_file) => {
-            let mut config = Ini::new();
-            let map = config.load(conf_file);
-            println!("{:?}", map.clone());
-            match map {
-                Ok(items) => {
-                    for section in items.keys() {
-                        println!("section: {:?}", section);
-                        let secitems = items.get(section).unwrap();
-                        for item in secitems.keys() {
-                            println!("\t{}={}", item, config.get(section, item).unwrap());
-                        }
-                    }
-                }
-                _ => (),
-            }
-        }
-        _ => (),
+    // Override some config items if given on the command line
+    match args.rotation {
+        Some(rotation) => config.rotation = rotation,
+        None => (),
     }
+
+    match args.directory {
+        Some(dir) => config.datadir = dir,
+        None => (),
+    }
+
+    if config.collectors.len() == 0 {
+        // create a default flow collector
+        let mut collector = CollectorConfig::default();
+        collector.port = 9995;
+        collector.name = "default".to_string();
+        config.collectors.push(collector);
+    }
+
+    debug!("CONFIG\n{:#?}", config);
 
     // createw signal handler to handle Ctrl+C and SIGABRT
     let mut signals = Signals::new([SIGINT, SIGABRT]).unwrap();
@@ -134,97 +222,58 @@ fn main() {
     // message channel between processor(s) and writer
     let (fw_tx, fw_rx) = unbounded::<StatsMessage>();
 
-    // 11111111111111111111111111111111111111111111111111111111111111111111111
-    // message channel between collector and processor
-    let (fp_tx, fp_rx) = unbounded::<FlowMessage>();
-    let collector_result = FlowCollector::new(
-        // "192.168.0.7".to_string(), 
-        None,
-        "first".to_string(), 
-        9995, 
-        fp_tx.clone());
-    match collector_result {
-        Ok(mut collector) => {
-            let fc_thread = thread::spawn(move || {
-                collector.start();
-            });
-            fc_threads.push(fc_thread);
-        }
-        Err( _ ) => {
-            info!("Failed to create flow collector, exiting");
-            exit(1);
-        }
-    }
-    fp_txs.push(fp_tx);
-
-    let processor_result = FlowProcessor::new(
-        "first".to_string(), 
-        fp_rx,
-        fw_tx.clone());
-    match processor_result {
-        Ok(mut processor) => {
-            let fp_thread = thread::spawn(move || {
-                processor.start();
+    for flowsource in &config.collectors {
+        // message channel between collector and processor
+        let (fp_tx, fp_rx) = unbounded::<FlowMessage>();
+        let collector_result = FlowCollector::new(
+            // "192.168.0.7".to_string(), 
+            flowsource.exporter_ip.clone(),
+            flowsource.name.clone(), 
+            flowsource.port, 
+            fp_tx.clone());
+        match collector_result {
+            Ok(mut collector) => {
+                let fc_thread = thread::spawn(move || {
+                    collector.start();
                 });
-            fp_threads.push(fp_thread);
+                fc_threads.push(fc_thread);
+            }
+            Err( _ ) => {
+                info!("Failed to create flow collector '{}', exiting", flowsource.name.clone());
+                exit(1);
+            }
         }
-        Err( _ ) => {
-            info!("Failed to create flow processor, exiting");
-            exit(1);
-        },
-    }
+        fp_txs.push(fp_tx);
 
-    // // 2222222222222222222222222222222222222222222222222222222222222222222222222
-    // message channel between collector and processor
-    let (fp_tx, fp_rx) = unbounded::<FlowMessage>();
-    let collector_result = FlowCollector::new(
-        // "192.168.0.7".to_string(), 
-        None,
-        "second".to_string(), 
-        9996, 
-        fp_tx.clone());
-    match collector_result {
-        Ok(mut collector) => {
-            let fc_thread = thread::spawn(move || {
-                collector.start();
-            });
-            fc_threads.push(fc_thread);
-        }
-        Err( _ ) => {
-            info!("Failed to create flow collector, exiting");
-            exit(1);
+        let processor_result = FlowProcessor::new(
+            flowsource.name.clone(), 
+            fp_rx,
+            fw_tx.clone());
+        match processor_result {
+            Ok(mut processor) => {
+                let fp_thread = thread::spawn(move || {
+                    processor.start();
+                    });
+                fp_threads.push(fp_thread);
+            }
+            Err( _ ) => {
+                info!("Failed to create flow processor '{}', exiting", flowsource.name.clone());
+                exit(1);
+            },
         }
     }
-    fp_txs.push(fp_tx);
-
-    let processor_result = FlowProcessor::new(
-        "second".to_string(), 
-        fp_rx,
-        fw_tx.clone());
-    match processor_result {
-        Ok(mut processor) => {
-            let fp_thread = thread::spawn(move || {
-                processor.start();
-                });
-            fp_threads.push(fp_thread);
-        }
-        Err( _ ) => {
-            info!("Failed to create flow processor, exiting");
-            exit(1);
-        },
-    }
-
-    // -----------------------------------------------------------------------
 
     // Now create the one flow writer
     let mut flowwriter = flowwriter::FlowWriter::new(
         fw_rx,
-        args.directory,
-        Some("testdb.testflows".to_string()),
-        0,  // TTL. 0 means no TTL
-        None,
-        None,
-        None,
+        config.datadir,
+        config.threshold*1000,
+        config.db_table,
+        // None,
+        config.ttl,  // TTL. 0 means no TTL
+        config.ch_host,
+        config.ch_user,
+        config.ch_pwd,
     );
 
     let fw_thread = thread::spawn(move || {
@@ -232,20 +281,14 @@ fn main() {
     });
 
     // What is the next time we need to rotate files?
-    let mut next_ts = get_next_timer(args.rotation);
-    // debug!("First rotation at {}", next_ts_str);
+    let mut next_ts = get_next_timer(config.rotation);
 
     // Everything prepared. Keep on looping until we receive a signal to stop (SIGINT or SIGABRT)
     loop {
         let now_ts = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
-        // let next_ts_str:DateTime<Local> = Utc.timestamp_opt(next_ts.as_secs() as i64, 0).unwrap().into();
         if now_ts > next_ts {
-            // send_cmd(9995, &format!("flush {}", next_ts_str));
             let _ = fw_tx.send(StatsMessage::Command("tick".to_string())).unwrap();
-            // for tx in fc_txs.clone() {
-            //     let _ = tx.send("tick".to_string());
-            // }
-            next_ts = get_next_timer(args.rotation);
+            next_ts = get_next_timer(config.rotation);
         }
         // check if we received a SIGINT/SIGABRT signal
         if STOP.is_completed() {
@@ -280,8 +323,9 @@ fn main() {
     match socket_r {
         Ok(socket) => {
             let message = String::from("quit").into_bytes();
-            let _ = socket.send_to(&message, "127.0.0.1:9995");
-            let _ = socket.send_to(&message, "127.0.0.1:9996");
+            for collector in &config.collectors {
+                let _ = socket.send_to(&message, format!("127.0.0.1:{}", collector.port));
+            }
         }
         Err(e) => {
             error!("Could not create UDP socket - {:?}", e);

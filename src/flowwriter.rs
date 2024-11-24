@@ -20,6 +20,7 @@ use crate::flowstats::*;
 pub struct FlowWriter {
     rx          : channel::Receiver<StatsMessage>,
     base_dir    : String,
+    threshold   : u64,              // Number of flows collected that will lead to a rotation
     schema      : Schema,           // Schema of the parquet file
     writer      : ArrowWriter<std::fs::File>,
     flows       : Vec<FlowStats>,   // Will contain flowstats
@@ -37,6 +38,7 @@ impl FlowWriter {
     pub fn new(
         rx          : channel::Receiver<StatsMessage>,
         base_dir    : String,
+        threshold   : u64,
         ch_db_table : Option<String>,   // DB and table to write to (if any)
         ch_ttl      : u64,              // TTL to set for the table (0 if none)
         ch_host     : Option<String>,   // CH Host to use (localhost if None)
@@ -64,6 +66,7 @@ impl FlowWriter {
         let mut fw = FlowWriter {
             rx          : rx,
             base_dir    : base_dir.to_string(),
+            threshold   : threshold,
             schema      : schema.clone(),
             writer      : writer,
             flows       : Vec::new(),
@@ -91,10 +94,6 @@ impl FlowWriter {
                 StatsMessage::Command(cmd) => {
                     if cmd.starts_with("tick") {
                         self.rotate_tick(true);
-                        // debug!("Received rotation timer tick");
-                        // if let Some(fw) = self.flow_writer.as_mut() {
-                        //     fw.rotate_tick(true);
-                        // }
                     } else {
                         println!("received command: {}", cmd);
                     }
@@ -114,10 +113,9 @@ impl FlowWriter {
 
         self.flows.push(flow);
 
-        if self.flows.len() >= 250_000 {
+        if self.flows.len() as u64 >= self.threshold {
             let delta: f64 = self.last_rot.elapsed().as_millis() as f64;
-            // delta = delta / 1000.0;
-            debug!("Buffer threshold reached. Rotating. {:.1} kflows/s", 250000.0/delta);
+            debug!("Buffer threshold reached. Rotating. {:.1} kflows/s", self.threshold as f64/delta);
             // self.write_batch();
             self.rotate(true);
         }
@@ -152,6 +150,12 @@ impl FlowWriter {
         if self.last_rot.elapsed() > Duration::from_secs(2) || !open_new {
             if self.flows.len() > 0 {
                 self.rotate(open_new);
+            } else {
+                // remove the 'current' file
+                let filename = format!("{}/flows.current.parquet", self.base_dir.clone());
+                if !open_new {
+                    let _ = std::fs::remove_file(filename);
+                }
             }
         } else {
             debug!("Last rotation less than 2 seconds ago, not bothered");

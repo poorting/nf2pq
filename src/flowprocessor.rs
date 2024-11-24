@@ -65,7 +65,6 @@ impl FlowProcessor {
             match msg {
                 FlowMessage::Command(cmd) => {
                     if cmd.starts_with("quit") {
-                        debug!("flowprocessor '{}' received quit command", self.source_name.clone());
                         break;
                     } else {
                         debug!("received command: {}", cmd);

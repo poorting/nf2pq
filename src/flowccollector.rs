@@ -51,7 +51,9 @@ impl FlowCollector {
             match socket.recv_from(&mut buf) {
                 Ok((number_of_bytes, src_addr )) => {
                     // println!("received data!");
-                    if  self.source_ip.len() == 0 || src_addr.ip() == IpAddr::from_str(&self.source_ip).unwrap() {
+                    if  self.source_ip.len() == 0 || 
+                        src_addr.ip() == IpAddr::from_str(&self.source_ip).unwrap() ||
+                        src_addr.ip().is_loopback() {
                         let filled_buf = &mut buf[..number_of_bytes];
                         let result = self.fp_tx.send(FlowMessage::Datagram(filled_buf.to_owned()));
                         match result {
