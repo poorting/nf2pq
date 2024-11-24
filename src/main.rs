@@ -12,15 +12,14 @@ use tracing::level_filters::LevelFilter;
 use std::thread;
 use std::sync::Once;
 use crossbeam::channel::{unbounded, Sender};
-use tracing::{info, debug, error};
+use tracing::{info, error};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use configparser::ini::Ini;
 
 pub mod flowprocessor;
-pub mod flowccollector;
+pub mod flowcollector;
 pub mod flowstats;
 pub mod flowwriter;
-// pub mod flowinserter;
 
 // This will be called when SIGINT/SIGABRT is received
 // Can be tested by the main loop to see if we need to exit
@@ -134,7 +133,7 @@ fn parse_config(config_file: String) -> Option<MainConfig> {
 fn main() {
 
     let args = Args::parse();
-    println!("{:?}", args);
+    // println!("{:?}", args);
 
      // Read config file if provided
     let mut config = MainConfig::default();
@@ -198,7 +197,8 @@ fn main() {
         config.collectors.push(collector);
     }
 
-    debug!("CONFIG\n{:#?}", config);
+    // Log configuration, making it easier to spot errors in it.
+    info!("CONFIG\n{:#?}", config);
 
     // create a signal handler to handle Ctrl+C and SIGABRT
     let mut signals = Signals::new([SIGINT, SIGABRT]).unwrap();
@@ -245,7 +245,7 @@ fn main() {
                 fc_threads.push(fc_thread);
             }
             Err( _ ) => {
-                info!("Failed to create flow collector '{}', exiting", flowsource.name.clone());
+                error!("Failed to create flow collector '{}', exiting", flowsource.name.clone());
                 exit(1);
             }
         }
@@ -263,7 +263,7 @@ fn main() {
                 fp_threads.push(fp_thread);
             }
             Err( _ ) => {
-                info!("Failed to create flow processor '{}', exiting", flowsource.name.clone());
+                error!("Failed to create flow processor '{}', exiting", flowsource.name.clone());
                 exit(1);
             },
         }
@@ -321,7 +321,7 @@ fn main() {
             }
         }
     }
-    debug!("All flow processors have stopped");
+    info!("All flow processors have stopped");
 
     // At this point all channels between collector(s) and
     // processor(s) have closed. Collector(s) will stop
@@ -351,7 +351,7 @@ fn main() {
             }
         }
     }
-    debug!("All flow collectors have stopped");
+    info!("All flow collectors have stopped");
 
 
     // finally drop last reference to flowwriter channel
@@ -363,7 +363,7 @@ fn main() {
             error!("{:#?}", err);
         }
     }
-    debug!("Flow writer has stopped");
+    info!("Flow writer has stopped");
 
     // We can now exit cleanly
     info!("Exit nf2ch");
