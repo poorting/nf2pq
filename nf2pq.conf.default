@@ -65,14 +65,9 @@
 ; Specify each collector
 ; the name of the section is the name of the collector
 ; and will be reflected in the 'flowsrc' column
-; each collector can optionally have an IP address
-; specified with exporter_id. 
-; All UDP traffic from other sources will be ignored
-; Usually it's fine to leave that out
 
 ; [first]
 ; port = 9995
-; exporter_ip = 192.168.0.7
 
 ; [second]
 ; port = 9996

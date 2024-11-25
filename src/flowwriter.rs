@@ -262,8 +262,9 @@ impl FlowWriter {
 
         debug!("CH query: {}", query.clone());
 
-        let mut cmd = Command::new("clickhouse-client");
-        // if self.username.is_some() ...
+        // Use 'clickhouse client' rather then 'clickhouse-client' (e.g. for Mac)
+        let mut cmd = Command::new("clickhouse");
+        cmd.arg("client");
         if self.ch_host.is_some() {
             cmd.arg("--host");
             cmd.arg(self.ch_host.as_ref().unwrap().clone());
