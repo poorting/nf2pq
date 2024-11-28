@@ -52,9 +52,9 @@ impl FlowCollector {
         info!("Started listening for netflow from '{}' (ip: {}) on port {}", self.source_name, self.source_ip, self.port);
 
         let mut packets_received = 0;
+        let mut buf = [0u8; 65_535];
         loop {
             // Read from Socket 
-            let mut buf = [0u8; 65_535];
             match self.socket.recv_from(&mut buf) {
                 Ok((number_of_bytes, _src_addr )) => {
                     packets_received += 1;

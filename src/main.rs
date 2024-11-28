@@ -366,6 +366,6 @@ fn main() {
     info!("Flow writer has stopped");
 
     // We can now exit cleanly
-    info!("Exit nf2ch");
+    info!("Exit nf2pq");
 
 }

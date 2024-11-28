@@ -29,30 +29,22 @@ pub struct FlowProcessor {
     // base_dir    : String,
     rx          : channel::Receiver<FlowMessage>,
     tx          : channel::Sender<StatsMessage>,
-    // schema      : Schema,         // Schema of the parquet file
-    // writer      : ArrowWriter<std::fs::File>,
     parser      : FlowInfoCodec,
-    // flows       : Vec<FlowStats>,  // Will contain flowstats
-    // flow_writer  : Option<FlowWriter>,
 }
 
 
 impl FlowProcessor {
     pub fn new(
         source_name: String, 
-        // base_dir: String,
         rx: channel::Receiver<FlowMessage>,
         tx: channel::Sender<StatsMessage>,
-        // flow_writer: Option<FlowWriter>,
     ) -> Result<FlowProcessor, std::io::Error> {
 
         let fp = FlowProcessor {
             source_name : source_name.to_string(),
-            // base_dir    : base_dir.to_string(),
             rx          : rx,
             tx          : tx,
             parser      : FlowInfoCodec::default(),
-            // flow_writer : flow_writer,
         };
 
         return Ok(fp);
@@ -101,12 +93,6 @@ impl FlowProcessor {
         }
 
         info!("flowprocessor '{}' exiting gracefully ({} datagrams, {} flows received)", self.source_name, packets_received, flows_received);
-        // if let Some(fw) = self.flow_writer.as_mut() {
-        //     // fw.close_current();
-        //     fw.rotate_tick(false);
-        // }
-        // info!("Waiting a few seconds for cleaning up");
-        // thread::sleep(time::Duration::from_millis(3000));
     }
 
     fn process_v9packet(&mut self, v9pkt: NetFlowV9Packet) -> u64 {
@@ -165,8 +151,6 @@ impl FlowProcessor {
                                 _ => ()
                             }
                         }
-                        // let j = serde_json::to_string(&flow).expect("Error serializing to json");
-                        // debug!("{}",j);
                         self.push(flow);
                     }
                 }
@@ -218,9 +202,6 @@ impl FlowProcessor {
 
     pub fn push(&mut self, flow: FlowStats) {
         self.tx.send(StatsMessage::Stats(flow)).unwrap();
-        // if let Some(fw) = self.flow_writer.as_mut() {
-        //     fw.push(flow.clone());
-        // }
     }
 
 
