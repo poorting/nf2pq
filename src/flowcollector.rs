@@ -1,5 +1,4 @@
-use std::{net::UdpSocket, str::*};
-use std::net::IpAddr;
+use std::net::UdpSocket;
 use crossbeam::channel;
 use tracing::{instrument, info, error};
 
@@ -54,24 +53,18 @@ impl FlowCollector {
 
         let mut packets_received = 0;
         loop {
-            // Read from Socket OR from channel; whichever occurs first
-            let mut buf = [0; 65_535];
+            let mut buf = Vec::with_capacity(65535);
             match self.socket.recv_from(&mut buf) {
-                Ok((number_of_bytes, src_addr )) => {
+                Ok((number_of_bytes, _src_addr )) => {
                     packets_received += 1;
-                    // println!("received data!");
-                    // if  self.source_ip.len() == 0 || 
-                    //     src_addr.ip() == IpAddr::from_str(&self.source_ip).unwrap() ||
-                    //     src_addr.ip().is_loopback() {
-                        let filled_buf = &mut buf[..number_of_bytes];
-                        let result = self.fp_tx.send(FlowMessage::Datagram(filled_buf.to_owned()));
-                        match result {
-                            Err(_) => {
-                                break;
-                            }
-                            _ => (),
+                    let filled_buf = &mut buf[..number_of_bytes];
+                    let result = self.fp_tx.send(FlowMessage::Datagram(filled_buf.to_vec()));
+                    match result {
+                        Err(_) => {
+                            break;
                         }
-                    // }
+                        _ => (),
+                    }
                 }
 
                 Err(e) => {
