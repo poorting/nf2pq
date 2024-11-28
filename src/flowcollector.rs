@@ -53,7 +53,8 @@ impl FlowCollector {
 
         let mut packets_received = 0;
         loop {
-            let mut buf = Vec::with_capacity(65535);
+            // Read from Socket 
+            let mut buf = [0u8; 65_535];
             match self.socket.recv_from(&mut buf) {
                 Ok((number_of_bytes, _src_addr )) => {
                     packets_received += 1;
