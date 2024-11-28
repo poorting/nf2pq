@@ -61,6 +61,9 @@ impl FlowProcessor {
     pub fn start(&mut self) {
         // Listen to rx, 
         // check each message if it contains command or received datagram
+        let mut packets_received:u64 = 0;
+        let mut flows_received:u64 = 0;
+    
         for msg in self.rx.clone().iter() {
             match msg {
                 FlowMessage::Command(cmd) => {
@@ -71,6 +74,7 @@ impl FlowProcessor {
                     }
                 }
                 FlowMessage::Datagram(udp) => {
+                    packets_received += 1;
                     let mut bm_buf = BytesMut::with_capacity(0);
                     bm_buf.extend_from_slice(&udp);
             
@@ -80,7 +84,7 @@ impl FlowProcessor {
                         Ok(Some(pkt)) => {
                             match pkt {
                                 NetFlowV9(v9pkt) => {
-                                    self.process_v9packet(v9pkt);
+                                    flows_received += self.process_v9packet(v9pkt);
                                 }
                                 _ => () // ignore everything else (IPFIX)
                             }
@@ -96,7 +100,7 @@ impl FlowProcessor {
             }
         }
 
-        info!("flowprocessor '{}' exiting gracefully", self.source_name);
+        info!("flowprocessor '{}' exiting gracefully ({} datagrams, {} flows received)", self.source_name, packets_received, flows_received);
         // if let Some(fw) = self.flow_writer.as_mut() {
         //     // fw.close_current();
         //     fw.rotate_tick(false);
@@ -105,12 +109,14 @@ impl FlowProcessor {
         // thread::sleep(time::Duration::from_millis(3000));
     }
 
-    fn process_v9packet(&mut self, v9pkt: NetFlowV9Packet) {
+    fn process_v9packet(&mut self, v9pkt: NetFlowV9Packet) -> u64 {
+        let mut flows_received:u64 = 0;
         for set in v9pkt.sets() {
             // println!("{:?}", set);
             match set {
                 Set::Data{ records, ..} => {
                     for record in records {
+                        flows_received += 1;
                         let mut flow = FlowStats::new();
                         flow.flowsrc = Some(self.source_name.clone());
                         // println!("*********************************************");
@@ -167,8 +173,7 @@ impl FlowProcessor {
                 _ => () // Something else than Set
             }
         }
-
-
+        flows_received
     }
 
     fn tcp_flags_as_string(&mut self, flg: u8) -> String {

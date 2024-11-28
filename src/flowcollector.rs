@@ -52,11 +52,13 @@ impl FlowCollector {
 
         info!("Started listening for netflow from '{}' (ip: {}) on port {}", self.source_name, self.source_ip, self.port);
 
+        let mut packets_received = 0;
         loop {
             // Read from Socket OR from channel; whichever occurs first
             let mut buf = [0; 65_535];
             match self.socket.recv_from(&mut buf) {
                 Ok((number_of_bytes, src_addr )) => {
+                    packets_received += 1;
                     // println!("received data!");
                     // if  self.source_ip.len() == 0 || 
                     //     src_addr.ip() == IpAddr::from_str(&self.source_ip).unwrap() ||
@@ -77,7 +79,7 @@ impl FlowCollector {
                 }
             }
         }
-        info!("flowcollector '{}' exiting gracefully", self.source_name);
+        info!("flowcollector '{}' exiting gracefully ({} datagrams received)", self.source_name, packets_received);
 
     }
 
