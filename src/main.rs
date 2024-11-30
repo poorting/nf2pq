@@ -27,23 +27,23 @@ static STOP: Once = Once::new();
 
 #[derive(Debug, Default)]
 pub struct CollectorConfig {
-    pub port:u16,
-    pub name:String,
-    pub exporter_ip:Option<String>,
+    pub port        :u16,
+    pub name        :String,
 }
 
 #[derive(Debug, Default)]
 pub struct MainConfig {
-    pub db_table: Option<String>,
-    pub ttl: u64,
-    pub ch_host: Option<String>,
-    pub ch_user: Option<String>,
-    pub ch_pwd: Option<String>,
-    pub threshold: u64,
-    pub datadir: String,
-    pub rotation: u64,
-    pub logdir: Option<String>,
-    pub collectors: Vec<CollectorConfig>,
+    pub sample_interval : u64,
+    pub db_table        : Option<String>,
+    pub ttl             : u64,
+    pub ch_host         : Option<String>,
+    pub ch_user         : Option<String>,
+    pub ch_pwd          : Option<String>,
+    pub threshold       : u64,
+    pub datadir         : String,
+    pub rotation        : u64,
+    pub logdir          : Option<String>,
+    pub collectors      : Vec<CollectorConfig>,
 }
 
 
@@ -89,22 +89,11 @@ fn parse_config(config_file: String) -> Option<MainConfig> {
                 if section == "default" {
                     cfg.logdir = config.get(section, "logdir");
                     cfg.db_table = config.get(section, "db_table");
-                    match config.get(section, "datadir") {
-                        Some(datadir) => cfg.datadir = datadir,
-                        None => cfg.datadir = temp_dir().display().to_string(),
-                    }
-                    match config.getuint(section, "rotation").unwrap() {
-                        Some(rotation) => cfg.rotation = rotation,
-                        None => cfg.rotation = 5,
-                    }
-                    match config.getuint(section, "ttl").unwrap() {
-                        Some(ttl) => cfg.ttl = ttl,
-                        None => cfg.ttl = 0,
-                    }
-                    match config.getuint(section, "threshold").unwrap() {
-                        Some(threshold) => cfg.threshold = threshold,
-                        None => cfg.threshold = 250,
-                    }
+                    cfg.datadir = config.get(section, "datadir").or_else(|| {Some(temp_dir().display().to_string())}).unwrap();
+                    cfg.rotation = config.getuint(section, "rotation").unwrap().or_else(|| {Some(0)}).unwrap();
+                    cfg.ttl = config.getuint(section, "ttl").unwrap().or_else(||{Some(0)}).unwrap(); 
+                    cfg.threshold = config.getuint(section, "threshold").unwrap().or_else(||{Some(250)}).unwrap();
+                    cfg.sample_interval = config.getuint(section, "sample_interval").unwrap().or_else(||{Some(1)}).unwrap();
                     cfg.ch_host = config.get(section, "ch_host");
                     cfg.ch_user = config.get(section, "ch_user");
                     cfg.ch_pwd = config.get(section, "ch_pwd");
@@ -118,7 +107,6 @@ fn parse_config(config_file: String) -> Option<MainConfig> {
                             port_def += 1;
                         }
                     }
-                    collector.exporter_ip = config.get(section, "exporter_ip");
                     cfg.collectors.push(collector);
                 }
             }
@@ -232,8 +220,6 @@ fn main() {
         // message channel between collector and processor
         let (fp_tx, fp_rx) = unbounded::<FlowMessage>();
         let collector_result = FlowCollector::new(
-            // "192.168.0.7".to_string(), 
-            flowsource.exporter_ip.clone(),
             flowsource.name.clone(), 
             flowsource.port, 
             fp_tx.clone());
@@ -253,6 +239,7 @@ fn main() {
 
         let processor_result = FlowProcessor::new(
             flowsource.name.clone(), 
+            config.sample_interval,
             fp_rx,
             fw_tx.clone());
         match processor_result {

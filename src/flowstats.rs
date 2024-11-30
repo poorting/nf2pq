@@ -26,8 +26,8 @@ pub struct FlowStats {
     pub dp      : Option<u16>,
     pub pr      : Option<String>,
     pub flg     : Option<String>,
-    // pub icmp_type: Option<u8>,
-    // pub icmp_code: Option<u8>,
+    pub icmp_type: Option<u8>,
+    pub icmp_code: Option<u8>,
     pub ipkt    : Option<u64>,
     pub ibyt    : Option<u64>,
     pub smk     : Option<u8>,
@@ -37,7 +37,7 @@ pub struct FlowStats {
     pub outif   : Option<u16>,
     pub sas     : Option<u32>,
     pub das     : Option<u32>,
-    pub exid    : Option<u16>,
+    // pub exid    : Option<u16>,
     pub flowsrc : Option<String>,
 }
 
@@ -58,8 +58,8 @@ impl FlowStats {
         fields.push(Field::new("dp", UInt16, true));
         fields.push(Field::new("pr", Utf8, true));
         fields.push(Field::new("flg", Utf8, true));
-        // fields.push(Field::new("icmp_type", UInt8, true));
-        // fields.push(Field::new("icmp_code", UInt8, true));
+        fields.push(Field::new("icmp_type", UInt8, true));
+        fields.push(Field::new("icmp_code", UInt8, true));
         fields.push(Field::new("ipkt", UInt64, true));
         fields.push(Field::new("ibyt", UInt64, true));
         fields.push(Field::new("smk", UInt8, true));
@@ -69,7 +69,7 @@ impl FlowStats {
         fields.push(Field::new("out", UInt16, true));
         fields.push(Field::new("sas", UInt32, true));
         fields.push(Field::new("das", UInt32, true));
-        fields.push(Field::new("exid", UInt16, true));
+        // fields.push(Field::new("exid", UInt16, true));
         fields.push(Field::new("flowsrc", Utf8, true));
 
         return fields;
