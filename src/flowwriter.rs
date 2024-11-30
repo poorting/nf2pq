@@ -128,7 +128,6 @@ impl FlowWriter {
         // let filename = format!("{}/flows.current", self.base_dir.clone());
         // Rename to naming scheme
         let to_file = format!("{}/flows-{}.parquet", self.base_dir.clone(), loc_now.format("%Y-%m-%d-%H:%M:%S%.6f"));
-        debug!("Writing to {}", to_file.clone());
         // std::fs::rename(filename.clone(), to_file.clone()).unwrap();
         let props = WriterProperties::builder()
             .set_writer_version(WriterVersion::PARQUET_2_0)
@@ -140,7 +139,7 @@ impl FlowWriter {
         let mut writer = ArrowWriter::try_new(file, Arc::new(self.schema.clone()), Some(props)).unwrap();
     
         let batch = self.record_batch();
-        debug!("Writing batch ({} flows)", batch.num_rows());
+        debug!("Writing {} flows to {}", batch.num_rows(), to_file.clone());
         writer.write(&batch).unwrap();
         let _ = writer.flush();
         match writer.finish() {
