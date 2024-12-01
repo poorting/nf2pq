@@ -75,7 +75,6 @@ impl FlowProcessor {
                     }
                 }
                 FlowMessage::Datagram(flowpkt) => {
-                    // debug!("PACKET! ({} -> {})", flowpkt.src_addr.to_string(), packets_received);
                     packets_received += 1;
                     let mut bm_buf = BytesMut::with_capacity(0);
                     bm_buf.extend_from_slice(&flowpkt.dgram);
@@ -126,12 +125,6 @@ impl FlowProcessor {
             match set {
                 netgauze_flow_pkt::ipfix::Set::Data { records, ..} => {
                     for record in records {
-                        // debug!("{:?}", record);
-
-                        // for scoped_field in record.scope_fields() {
-                        //     // get some generic data from this
-                        //     debug!("scoped_fields: {:?}", scoped_field);
-                        // }
                         if record.scope_fields().len() > 0 {
                             // debug!("Scope: {:?}", record.fields());
                         } else {
@@ -189,10 +182,12 @@ impl FlowProcessor {
                 destinationIPv4Address(addr) => flow.da = Some(addr.0.to_string()),
                 sourceIPv6Address(addr) => flow.sa = Some(addr.0.to_string()),
                 destinationIPv6Address(addr) => flow.da = Some(addr.0.to_string()),
+                ipNextHopIPv4Address(addr) => flow.nh = Some(addr.0.to_string()),
+                ipNextHopIPv6Address(addr) => flow.nh = Some(addr.0.to_string()),
                 sourceTransportPort(port) => flow.sp = Some(port.0),
                 destinationTransportPort(port) => flow.dp = Some(port.0),
-                packetDeltaCount(cnt) =>  flow.ipkt = Some(cnt.0 * self.sample_itv),
-                octetDeltaCount(cnt) => flow.ibyt = Some(cnt.0 * self.sample_itv),
+                packetDeltaCount(cnt) =>  flow.pkt = Some(cnt.0 * self.sample_itv),
+                octetDeltaCount(cnt) => flow.byt = Some(cnt.0 * self.sample_itv),
                 protocolIdentifier(proto) => {
                     match proto {
                         protocolIdentifier::Unassigned(proto_nr) => flow.pr = Some(proto_nr.to_string()),

@@ -1,14 +1,5 @@
 use arrow::datatypes::*;
-// use arrow::array::*;
 use arrow::datatypes::DataType::*;
-// use parquet::{
-//     basic::{Compression, Encoding},
-//     file::properties::*,
-//     arrow::ArrowWriter,
-// };
-// use serde::{Deserialize, Serialize};
-// use clickhouse::Row;
-
 
 #[derive(Debug, Clone)]
 pub enum StatsMessage {
@@ -28,11 +19,12 @@ pub struct FlowStats {
     pub flg     : Option<String>,
     pub icmp_type: Option<u8>,
     pub icmp_code: Option<u8>,
-    pub ipkt    : Option<u64>,
-    pub ibyt    : Option<u64>,
+    pub pkt     : Option<u64>,
+    pub byt     : Option<u64>,
     pub smk     : Option<u8>,
     pub dmk     : Option<u8>,
     pub ra      : Option<String>,
+    pub nh      : Option<String>,
     pub inif    : Option<u16>,
     pub outif   : Option<u16>,
     pub sas     : Option<u32>,
@@ -60,16 +52,16 @@ impl FlowStats {
         fields.push(Field::new("flg", Utf8, true));
         fields.push(Field::new("icmp_type", UInt8, true));
         fields.push(Field::new("icmp_code", UInt8, true));
-        fields.push(Field::new("ipkt", UInt64, true));
-        fields.push(Field::new("ibyt", UInt64, true));
+        fields.push(Field::new("pkt", UInt64, true));
+        fields.push(Field::new("byt", UInt64, true));
         fields.push(Field::new("smk", UInt8, true));
         fields.push(Field::new("dmk", UInt8, true));
         fields.push(Field::new("ra", Utf8, true));
+        fields.push(Field::new("nh", Utf8, true));
         fields.push(Field::new("in", UInt16, true));
         fields.push(Field::new("out", UInt16, true));
         fields.push(Field::new("sas", UInt32, true));
         fields.push(Field::new("das", UInt32, true));
-        // fields.push(Field::new("exid", UInt16, true));
         fields.push(Field::new("flowsrc", Utf8, true));
 
         return fields;

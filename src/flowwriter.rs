@@ -178,11 +178,12 @@ impl FlowWriter {
         let flg = GenericStringArray::<i32>::from(self.flows.iter().map(|p| p.flg.clone()).collect::<Vec<Option<String>>>());
         let icmp_type = UInt8Array::from(self.flows.iter().map(|p| p.icmp_type).collect::<Vec<Option<u8>>>());
         let icmp_code = UInt8Array::from(self.flows.iter().map(|p| p.icmp_code).collect::<Vec<Option<u8>>>());
-        let ipkt = UInt64Array::from(self.flows.iter().map(|p| p.ipkt).collect::<Vec<Option<u64>>>());
-        let ibyt = UInt64Array::from(self.flows.iter().map(|p| p.ibyt).collect::<Vec<Option<u64>>>());
+        let pkt = UInt64Array::from(self.flows.iter().map(|p| p.pkt).collect::<Vec<Option<u64>>>());
+        let byt = UInt64Array::from(self.flows.iter().map(|p| p.byt).collect::<Vec<Option<u64>>>());
         let smk = UInt8Array::from(self.flows.iter().map(|p| p.smk).collect::<Vec<Option<u8>>>());
         let dmk = UInt8Array::from(self.flows.iter().map(|p| p.dmk).collect::<Vec<Option<u8>>>());
         let ra = GenericStringArray::<i32>::from(self.flows.iter().map(|p| p.ra.clone()).collect::<Vec<Option<String>>>());
+        let nh = GenericStringArray::<i32>::from(self.flows.iter().map(|p| p.nh.clone()).collect::<Vec<Option<String>>>());
         let inif = UInt16Array::from(self.flows.iter().map(|p| p.inif).collect::<Vec<Option<u16>>>());
         let outif = UInt16Array::from(self.flows.iter().map(|p| p.outif).collect::<Vec<Option<u16>>>());
         let sas = UInt32Array::from(self.flows.iter().map(|p| p.sas).collect::<Vec<Option<u32>>>());
@@ -203,11 +204,12 @@ impl FlowWriter {
                 Arc::new(flg),
                 Arc::new(icmp_type),
                 Arc::new(icmp_code),
-                Arc::new(ipkt),
-                Arc::new(ibyt),
+                Arc::new(pkt),
+                Arc::new(byt),
                 Arc::new(smk),
                 Arc::new(dmk),
                 Arc::new(ra),
+                Arc::new(nh),
                 Arc::new(inif),
                 Arc::new(outif),
                 Arc::new(sas),
@@ -285,11 +287,12 @@ impl FlowWriter {
                 `flg` LowCardinality(String),
                 `icmp_type` UInt8 DEFAULT 0,
                 `icmp_code` UInt8 DEFAULT 0,
-                `ipkt` UInt64,
-                `ibyt` UInt64,
+                `pkt` UInt64,
+                `byt` UInt64,
                 `smk` UInt8,
                 `dmk` UInt8,
                 `ra` LowCardinality(String),
+                `ra` String,
                 `in` UInt16 DEFAULT 0,
                 `out` UInt16 DEFAULT 0,
                 `sas` UInt32 DEFAULT 0,
