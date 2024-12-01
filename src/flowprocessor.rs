@@ -231,43 +231,14 @@ impl FlowProcessor {
         }
     }
 
-
     fn tcp_flags_as_string(&mut self, flg: u8) -> String {
+        let flags_src = "CEUAPRSF";
         let mut flags = String::from("........");
-            let fin = (flg & 0x01) != 0;
-            let syn = (flg & 0x02) != 0;
-            let rst = (flg & 0x04) != 0;
-            let psh = (flg & 0x08) != 0;
-            let ack = (flg & 0x10) != 0;
-            let urg = (flg & 0x20) != 0;
-            let ece = (flg & 0x40) != 0;
-            let cwr = (flg & 0x80) != 0;
-
-        if fin {
-            flags.replace_range(7..8, "F")
-        };
-        if syn {
-            flags.replace_range(6..7, "S")
-        };
-        if rst {
-            flags.replace_range(5..6, "R")
-        };
-        if psh {
-            flags.replace_range(4..5, "P")
-        };
-        if ack {
-            flags.replace_range(3..4, "A")
-        };
-        if urg {
-            flags.replace_range(2..3, "U")
-        };
-        if ece {
-            flags.replace_range(1..2, "E")
-        };
-        if cwr {
-            flags.replace_range(0..1, "C")
-        };
-
+        for i in 0..=7 as usize{
+            if (flg & 2_u8.pow(i as u32)) !=0 {
+                flags.replace_range(7-i..=7-i, &flags_src[7-i..=7-i]);
+            }
+        }
         return flags;
     }
 
