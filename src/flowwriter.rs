@@ -248,6 +248,7 @@ impl FlowWriter {
         cmd.stderr(std::process::Stdio::piped());
         cmd.stdout(std::process::Stdio::null());
         let mut success = true;
+        let start = Instant::now();
         match cmd.spawn().expect("Error query").wait_with_output() {
             Err(e) => {
                 success = false;
@@ -260,6 +261,8 @@ impl FlowWriter {
                     debug!("Some error when querying (exit code: {}, stderr={:?}", 
                         output.status.code().unwrap(), 
                         String::from_utf8(output.stderr));
+                } else {
+                    debug!("OK ({:?})", start.elapsed());
                 }
             }
         };
@@ -292,7 +295,7 @@ impl FlowWriter {
                 `smk` UInt8,
                 `dmk` UInt8,
                 `ra` LowCardinality(String),
-                `ra` String,
+                `nh` String,
                 `in` UInt16 DEFAULT 0,
                 `out` UInt16 DEFAULT 0,
                 `sas` UInt32 DEFAULT 0,
