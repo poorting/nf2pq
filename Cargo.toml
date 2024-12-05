@@ -3,6 +3,9 @@ name = "nf2pq"
 version = "0.2.0"
 edition = "2021"
 
+# [profile.release]
+# debug = 1
+
 [dependencies]
 anyhow = "1.0.93"
 arrow = "53.2.0"
@@ -13,6 +16,7 @@ clickhouse = { version="0.13.1", features = ["inserter", "lz4", "time"]}
 configparser = { version = "3.1.0", features = ["indexmap"] }
 crossbeam = "0.8"
 log = "0.4.22"
+netflow_parser = "0.4.8"
 netgauze-flow-pkt = "0.5.0"
 netgauze-flow-service = "0.5.0"
 netgauze-iana = "0.5.0"

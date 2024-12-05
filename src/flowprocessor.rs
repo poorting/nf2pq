@@ -1,18 +1,18 @@
-use std::{collections::HashMap, fmt::Debug, net::IpAddr};
+use std::{collections::{BTreeMap, HashMap}, fmt::Debug, net::{IpAddr, Ipv4Addr}};
 use bytes::BytesMut;
-use netgauze_flow_pkt::{ie::Field, ipfix::IpfixPacket, netflow::NetFlowV9Packet};
+// use netgauze_flow_pkt::{ie::Field, ipfix::IpfixPacket, netflow::NetFlowV9Packet};
 use tokio_util::codec::Decoder;
-use netgauze_flow_pkt::{
-    codec::*, 
-    netflow::Set,
-    FlowInfo::NetFlowV9,
-    FlowInfo::IPFIX,
-    ie::Field::*,
-    ie::protocolIdentifier,
-};
+// use netgauze_flow_pkt::{
+//     codec::*, 
+//     netflow::Set,
+//     FlowInfo::NetFlowV9,
+//     FlowInfo::IPFIX,
+//     ie::Field::*,
+//     ie::protocolIdentifier,
+// };
 use crossbeam::channel::{self};
-use tracing::{info, debug, error};
-
+use tracing::{debug, error, field, info};
+use netflow_parser::{variable_versions::{data_number::{FieldDataType, FieldValue, DataNumber}, ipfix::IPFix, ipfix_lookup::IPFixField}, NetflowPacket, NetflowParser};
 use crate::flowstats::*;
 
 // Exchange of information between collector and processor
@@ -63,7 +63,9 @@ impl FlowProcessor {
         // check each message if it contains command or received datagram
         let mut packets_received:u64 = 0;
         let mut flows_received:u64 = 0;
-        let mut exporters = HashMap::new();
+        let mut exporters: HashMap<IpAddr, NetflowParser> = HashMap::new();
+
+        // let mut parser = NetflowParser::default();
 
         for msg in self.rx.clone().iter() {
             match msg {
@@ -76,155 +78,96 @@ impl FlowProcessor {
                 }
                 FlowMessage::Datagram(flowpkt) => {
                     packets_received += 1;
-                    let mut bm_buf = BytesMut::with_capacity(0);
-                    bm_buf.extend_from_slice(&flowpkt.dgram);
-            
-                    // let result = self.parser.decode(&mut bm_buf);
-                    let result = exporters
-                        .entry(flowpkt.src_addr.to_owned())
-                        .or_insert(FlowInfoCodec::default())
-                        .decode(&mut bm_buf);
-                    match result {
-                        Ok(Some(pkt)) => {
-                            // debug!("{:#?}",pkt);
-                            match pkt {
-                                NetFlowV9(v9pkt) => {
-                                    flows_received += self.process_v9packet(v9pkt, flowpkt.src_addr.to_string());
-                                }
-                                IPFIX(ipfix_pkt) => {
-                                    // debug!("{:?}",ipfix_packet);
-                                    flows_received += self.process_ipfix_packet(ipfix_pkt, flowpkt.src_addr.to_string());
-                                }
-                            }
+                    // let mut bm_buf = BytesMut::with_capacity(0);
+                    // bm_buf.extend_from_slice(&flowpkt.dgram);
+
+                    let result = match exporters.get_mut(&flowpkt.src_addr) {
+                        Some(parser) => parser.parse_bytes(flowpkt.dgram.as_slice()),
+                        None => {
+                            let mut new_parser = NetflowParser::default();
+                            let result = new_parser.parse_bytes(flowpkt.dgram.as_slice());
+                            exporters.insert(flowpkt.src_addr, new_parser);
+                            result
                         }
-                        Ok(None) => {
-                            debug!("Ok(None) from parser.decode");
-                        },
-                        Err(error) => {
-                            // error!("Error decoding flow packet: {:#?}",error);
-                            match error {
-                                FlowInfoCodecDecoderError::IpfixParsingError(_) => (),
-                                FlowInfoCodecDecoderError::NetFlowV9ParingError(_) => (),
-                                _ => error!("Error decoding flow packet: {:#?}",error),
+                    };
+            
+                    // debug!("parsed: {:?}", result);
+                    for nfpacket in result {
+                        match nfpacket {
+                            NetflowPacket::IPFix(ipfix) => {
+                                flows_received += self.process_ipfix_packet(ipfix, flowpkt.src_addr.to_string());
                             }
+                            _ => (),                    
                         }
                     }
                 }
             }
         }
-
         info!("flowprocessor '{}' exiting gracefully ({} datagrams, {} flows received)", self.source_name, packets_received, flows_received);
     }
 
-
-    fn process_ipfix_packet(&mut self, ipfix_pkt: IpfixPacket, router_ip: String) -> u64 {
+    fn process_ipfix_packet(&mut self, ipfix:IPFix, exporter_ip: String) -> u64 {
         let mut flows_received:u64 = 0;
-        // ipfix_pkt.observation_domain_id()
-        for set in ipfix_pkt.sets() {
-            // println!("{:?}", set);
-            match set {
-                netgauze_flow_pkt::ipfix::Set::Data { records, ..} => {
-                    for record in records {
-                        if record.scope_fields().len() > 0 {
-                            // debug!("Scope: {:?}", record.fields());
-                        } else {
-                            flows_received += 1;
-                            let mut flow = FlowStats::new();
-                            flow.flowsrc = Some(self.source_name.clone());
-                            flow.ra = Some(router_ip.clone());
-                            self.process_flow_fields(record.fields(), &mut flow);
-                            self.push(flow);
-                            }
-                        // debug!("{:?}", flow);
+        for flowset in ipfix.flowsets.iter() {
+        if flowset.body.options_data.is_some() {
+            // debug!("options data: {:?}",flowset.body);
+        } else {
+            for flows_data in flowset.body.data.iter() {
+                for flow_fields in flows_data.data_fields.iter() {
+                    flows_received += 1;
+                    let mut flow = FlowStats::new();
+                    flow.flowsrc = Some(self.source_name.clone());
+                    flow.ra = Some(exporter_ip.clone());
+                    self.process_flow_fields(flow_fields, &mut flow);
+                    self.push(flow);
                     }
-                }
-                netgauze_flow_pkt::ipfix::Set::Template(_ot) => {
-                    // debug!("{:#?}", ot);
-                }
-                netgauze_flow_pkt::ipfix::Set::OptionsTemplate(_ot) => {
-                    // debug!("{:#?}", ot);
                 }
             }
         }
-        flows_received
+        return flows_received;
     }
 
-    fn process_v9packet(&mut self, v9pkt: NetFlowV9Packet, router_ip: String) -> u64 {
-        let mut flows_received:u64 = 0;
-        for set in v9pkt.sets() {
-            // println!("{:?}", set);
-            match set {
-                Set::Data{ records, ..} => {
-                    for record in records {
-                        flows_received += 1;
-                        let mut flow = FlowStats::new();
-                        flow.flowsrc = Some(self.source_name.clone());
-                        flow.ra = Some(router_ip.clone());
-                        // println!("*********************************************");
-                        self.process_flow_fields(record.fields(), &mut flow);
-                        self.push(flow);
-                    }
-                }
-                _ => () // Something else than Set
-            }
-        }
-        flows_received
-    }
-
-
-    fn process_flow_fields(&mut self, fields: &Vec<Field>, flow: &mut FlowStats) {
-        for field in fields {
-            // println!("{:?}", field);
+    fn process_flow_fields(&mut self, fields:&BTreeMap<usize, (IPFixField, FieldValue)> , flow: &mut FlowStats) {
+        for (_fieldnr, field) in fields.iter() {
+            // debug!("{:?}", field);
             match field {
-                flowStartMilliseconds(time_ms) => flow.ts = Some(time_ms.0.timestamp_micros()),
-                flowEndMilliseconds(time_ms) => flow.te = Some(time_ms.0.timestamp_micros()),
-                sourceIPv4Address(addr) => flow.sa = Some(addr.0.to_string()),
-                destinationIPv4Address(addr) => flow.da = Some(addr.0.to_string()),
-                sourceIPv6Address(addr) => flow.sa = Some(addr.0.to_string()),
-                destinationIPv6Address(addr) => flow.da = Some(addr.0.to_string()),
-                ipNextHopIPv4Address(addr) => flow.nh = Some(addr.0.to_string()),
-                ipNextHopIPv6Address(addr) => flow.nh = Some(addr.0.to_string()),
-                sourceTransportPort(port) => flow.sp = Some(port.0),
-                destinationTransportPort(port) => flow.dp = Some(port.0),
-                packetDeltaCount(cnt) =>  flow.pkt = Some(cnt.0 * self.sample_itv),
-                octetDeltaCount(cnt) => flow.byt = Some(cnt.0 * self.sample_itv),
-                protocolIdentifier(proto) => {
-                    match proto {
-                        protocolIdentifier::Unassigned(proto_nr) => flow.pr = Some(proto_nr.to_string()),
-                        _ => flow.pr = Some(proto.to_string()),
-                    }
+                (IPFixField::FlowStartMilliseconds, FieldValue::Duration(d)) => flow.ts = Some(d.as_micros() as i64),
+                (IPFixField::FlowEndMilliseconds, FieldValue::Duration(d)) => flow.te = Some(d.as_micros() as i64),
+                (IPFixField::SourceIpv4address, FieldValue::Ip4Addr(a)) => flow.sa = Some(a.to_string()),
+                (IPFixField::DestinationIpv4address, FieldValue::Ip4Addr(a)) => flow.da = Some(a.to_string()),
+                (IPFixField::SourceIpv6address, FieldValue::Ip6Addr(a)) => flow.sa = Some(a.to_string()),
+                (IPFixField::DestinationIpv6address, FieldValue::Ip6Addr(a)) => flow.da = Some(a.to_string()),
+                (IPFixField::IpNextHopIpv4address, FieldValue::Ip4Addr(a)) => flow.nh = Some(a.to_string()),
+                (IPFixField::IpNextHopIpv6address, FieldValue::Ip6Addr(a)) => flow.nh = Some(a.to_string()),
+                (IPFixField::SourceTransportPort, FieldValue::DataNumber(DataNumber::U16(p))) => flow.sp = Some(*p),
+                (IPFixField::DestinationTransportPort, FieldValue::DataNumber(DataNumber::U16(p))) => flow.dp = Some(*p),
+                (IPFixField::OctetDeltaCount, FieldValue::DataNumber(DataNumber::U64(c))) => flow.byt = Some(*c * self.sample_itv),
+                (IPFixField::PacketDeltaCount, FieldValue::DataNumber(DataNumber::U64(c))) => flow.pkt = Some(*c * self.sample_itv),
+                (IPFixField::ProtocolIdentifier, FieldValue::DataNumber(DataNumber::U8(b))) => flow.pr = Some(*b),
+                (IPFixField::TcpControlBits, FieldValue::DataNumber(DataNumber::U8(b))) => flow.flg = Some(self.tcp_flags_as_string(*b)),
+                (IPFixField::SourceIpv4prefixLength, FieldValue::DataNumber(DataNumber::U8(b))) => flow.smk = Some(*b),
+                (IPFixField::DestinationIpv4prefixLength, FieldValue::DataNumber(DataNumber::U8(b))) => flow.dmk = Some(*b),
+                (IPFixField::SourceIpv6prefixLength, FieldValue::DataNumber(DataNumber::U8(b))) => flow.smk = Some(*b),
+                (IPFixField::DestinationIpv6prefixLength, FieldValue::DataNumber(DataNumber::U8(b))) => flow.dmk = Some(*b),
+                (IPFixField::BgpSourceAsNumber, FieldValue::DataNumber(DataNumber::U32(nr))) => flow.sas = Some(*nr),
+                (IPFixField::BgpDestinationAsNumber, FieldValue::DataNumber(DataNumber::U32(nr))) => flow.das = Some(*nr),
+                (IPFixField::IngressInterface, FieldValue::DataNumber(DataNumber::U32(nr))) => flow.inif = Some(*nr as u16),
+                (IPFixField::EgressInterface, FieldValue::DataNumber(DataNumber::U32(nr))) => flow.outif = Some(*nr as u16),
+                (IPFixField::IcmpTypeCodeIpv4, FieldValue::DataNumber(DataNumber::U16(tc))) => {
+                    flow.icmp_type = Some( ((*tc >> 8) & 0xFF) as u8);
+                    flow.icmp_code = Some((*tc & 0xFF) as u8);
                 }
-                tcpControlBits(flags) => flow.flg = Some(self.tcp_flags_as_string(flags.to_owned().into())),
-                sourceIPv4PrefixLength(mask) => flow.smk = Some(mask.0),
-                destinationIPv4PrefixLength(mask) => flow.dmk = Some(mask.0),
-                sourceIPv6PrefixLength(mask) => flow.smk = Some(mask.0),
-                destinationIPv6PrefixLength(mask) => flow.dmk = Some(mask.0),
-                bgpSourceAsNumber(asnr) => flow.sas = Some(asnr.0),
-                bgpDestinationAsNumber(asnr) => flow.das = Some(asnr.0),
-                ingressInterface(intf) => flow.inif = Some(intf.0 as u16),
-                egressInterface(intf) => flow.outif = Some(intf.0 as u16),
-
-                ipv4RouterSc(addr) => flow.ra = Some(addr.0.to_string()),
-                exporterIPv6Address(addr) => flow.ra = Some(addr.0.to_string()),
-                exporterIPv4Address(addr) => flow.ra = Some(addr.0.to_string()),
-                icmpTypeCodeIPv4(tyco) => {
-                    if tyco.0 > 0 {
-                        // println!("icmp type: {}, icmp code: {}", tyco.0 >> 8, tyco.0 & 0xFF);
-                        flow.icmp_type = Some( ((tyco.0 >> 8) & 0xFF) as u8);
-                        flow.icmp_code = Some((tyco.0 & 0xFF) as u8);
-                    }
+                (IPFixField::IcmpTypeCodeIpv6, FieldValue::DataNumber(DataNumber::U16(tc))) => {
+                    flow.icmp_type = Some( ((*tc >> 8) & 0xFF) as u8);
+                    flow.icmp_code = Some((*tc & 0xFF) as u8);
                 }
-                icmpTypeCodeIPv6(tyco) => {
-                    if tyco.0 > 0 {
-                        // println!("icmp type: {}, icmp code: {}", tyco.0 >> 8, tyco.0 & 0xFF);
-                        flow.icmp_type = Some( ((tyco.0 >> 8) & 0xFF) as u8);
-                        flow.icmp_code = Some((tyco.0 & 0xFF) as u8);
-                    }
-                }
-                _ => ()
+                // (IPFixField::IngressInterface, value) => {debug!("flg: {:?}", value);},
+                _ => (),
+                
             }
         }
     }
+
 
     fn tcp_flags_as_string(&mut self, flg: u8) -> String {
         let flags_src = "CEUAPRSF";
