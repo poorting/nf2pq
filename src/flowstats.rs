@@ -15,7 +15,7 @@ pub struct FlowStats {
     pub da      : Option<String>,
     pub sp      : Option<u16>,
     pub dp      : Option<u16>,
-    pub pr      : Option<String>,
+    pub pr      : Option<u8>,
     pub flg     : Option<String>,
     pub icmp_type: Option<u8>,
     pub icmp_code: Option<u8>,
@@ -48,7 +48,7 @@ impl FlowStats {
         fields.push(Field::new("da", Utf8, true));
         fields.push(Field::new("sp", UInt16, true));
         fields.push(Field::new("dp", UInt16, true));
-        fields.push(Field::new("pr", Utf8, true));
+        fields.push(Field::new("pr", UInt8, true));
         fields.push(Field::new("flg", Utf8, true));
         fields.push(Field::new("icmp_type", UInt8, true));
         fields.push(Field::new("icmp_code", UInt8, true));

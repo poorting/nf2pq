@@ -1,26 +1,18 @@
 [package]
 name = "nf2pq"
-version = "0.2.0"
+version = "0.2.3"
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.93"
-arrow = "53.2.0"
-bytes = "1.8.0"
+arrow = "53.3.0"
 chrono = "0.4.38"
 clap = { version = "4.5.21", features = ["derive"] }
-clickhouse = { version="0.13.1", features = ["inserter", "lz4", "time"]}
 configparser = { version = "3.1.0", features = ["indexmap"] }
 crossbeam = "0.8"
-log = "0.4.22"
-netgauze-flow-pkt = "0.5.0"
-netgauze-flow-service = "0.5.0"
-netgauze-iana = "0.5.0"
-parquet = "53.2.0"
+netflow_parser = { git="https://github.com/poorting/netflow_parser.git" }
+parquet = "53.3.0"
 serde = "1.0.215"
-serde_json = "1.0.132"
 signal-hook = "0.3.17"
-tokio-util = "0.7.12"
 tracing = { version = "0.1.40", features = ["attributes"] }
 tracing-appender = "0.2.3"
 tracing-subscriber = "0.3.18"
