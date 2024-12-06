@@ -109,9 +109,11 @@ impl FlowWriter {
     fn rotate_tick(&mut self, open_new: bool) {
 
         debug!("flowwriter tick ({:?})", self.last_rot.elapsed() );
-
         if self.last_rot.elapsed() > Duration::from_secs(2) || !open_new {
-            if self.flows.len() > 0 {
+            let flow_len = self.flows.len();
+            if flow_len > 0 {
+                let delta: f64 = self.last_rot.elapsed().as_millis() as f64;
+                debug!("    -> {:.1} kflows/s", flow_len as f64/delta);
                 self.rotate();
             }
         } else {
