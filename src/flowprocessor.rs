@@ -1,18 +1,7 @@
-use std::{collections::{BTreeMap, HashMap}, fmt::Debug, net::{IpAddr, Ipv4Addr}};
-use bytes::BytesMut;
-// use netgauze_flow_pkt::{ie::Field, ipfix::IpfixPacket, netflow::NetFlowV9Packet};
-use tokio_util::codec::Decoder;
-// use netgauze_flow_pkt::{
-//     codec::*, 
-//     netflow::Set,
-//     FlowInfo::NetFlowV9,
-//     FlowInfo::IPFIX,
-//     ie::Field::*,
-//     ie::protocolIdentifier,
-// };
+use std::{collections::{BTreeMap, HashMap}, fmt::Debug, net::IpAddr};
 use crossbeam::channel::{self};
-use tracing::{debug, error, field, info};
-use netflow_parser::{variable_versions::{data_number::{FieldDataType, FieldValue, DataNumber}, ipfix::IPFix, ipfix_lookup::IPFixField}, NetflowPacket, NetflowParser};
+use tracing::{debug, info};
+use netflow_parser::{variable_versions::{data_number::{FieldValue, DataNumber}, ipfix::IPFix, ipfix_lookup::IPFixField}, NetflowPacket, NetflowParser};
 use crate::flowstats::*;
 
 // Exchange of information between collector and processor
