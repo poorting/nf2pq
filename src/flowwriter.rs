@@ -176,8 +176,8 @@ impl FlowWriter {
         let da = GenericStringArray::<i32>::from(self.flows.iter().map(|p| p.da.clone()).collect::<Vec<Option<String>>>());
         let sp = UInt16Array::from(self.flows.iter().map(|p| p.sp).collect::<Vec<Option<u16>>>());
         let dp = UInt16Array::from(self.flows.iter().map(|p| p.dp).collect::<Vec<Option<u16>>>());
-        // let pr = GenericStringArray::<i32>::from(self.flows.iter().map(|p| p.pr.clone()).collect::<Vec<Option<String>>>());
         let pr = UInt8Array::from(self.flows.iter().map(|p| p.pr).collect::<Vec<Option<u8>>>());
+        let prs = GenericStringArray::<i32>::from(self.flows.iter().map(|p| p.prs.clone()).collect::<Vec<Option<String>>>());
         let flg = GenericStringArray::<i32>::from(self.flows.iter().map(|p| p.flg.clone()).collect::<Vec<Option<String>>>());
         let icmp_type = UInt8Array::from(self.flows.iter().map(|p| p.icmp_type).collect::<Vec<Option<u8>>>());
         let icmp_code = UInt8Array::from(self.flows.iter().map(|p| p.icmp_code).collect::<Vec<Option<u8>>>());
@@ -204,6 +204,7 @@ impl FlowWriter {
                 Arc::new(sp),
                 Arc::new(dp),
                 Arc::new(pr),
+                Arc::new(prs),
                 Arc::new(flg),
                 Arc::new(icmp_type),
                 Arc::new(icmp_code),
@@ -289,7 +290,8 @@ impl FlowWriter {
                 `da` String,
                 `sp` UInt16 DEFAULT 0,
                 `dp` UInt16 DEFAULT 0,
-                `pr` Nullable(String),
+                `pr` UInt8,
+                `prs` LowCardinality(String),
                 `flg` LowCardinality(String),
                 `icmp_type` UInt8 DEFAULT 0,
                 `icmp_code` UInt8 DEFAULT 0,
