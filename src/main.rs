@@ -165,6 +165,8 @@ fn main() {
         .with_max_level(level)
         .init();
 
+    info!("Starting nf2pq");
+
     // Override some config items if given on the command line
     match args.rotation {
         Some(rotation) => config.rotation = rotation,
@@ -353,6 +355,6 @@ fn main() {
     info!("Flow writer has stopped");
 
     // We can now exit cleanly
-    info!("Exit nf2pq");
+    info!("Exiting nf2pq");
 
 }
