@@ -9,7 +9,7 @@ use parquet::{
     arrow::ArrowWriter,
 };
 use chrono::*;
-use tracing::{info, debug, error};
+use tracing::{debug, error};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -88,7 +88,7 @@ impl FlowWriter {
             }
         }
 
-        info!("flowwriter '{}' exiting gracefully", self.base_dir.clone());
+        debug!("flowwriter '{}' exiting gracefully", self.base_dir.clone());
         self.rotate_tick(false);
 
     }

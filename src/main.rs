@@ -12,7 +12,7 @@ use tracing::level_filters::LevelFilter;
 use std::thread;
 use std::sync::Once;
 use crossbeam::channel::{unbounded, Sender};
-use tracing::{info, error};
+use tracing::{info, debug, error};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use configparser::ini::Ini;
 
@@ -123,13 +123,15 @@ fn main() {
     let args = Args::parse();
     // println!("{:?}", args);
 
-     // Read config file if provided
+    // set a default config
     let mut config = MainConfig::default();
     config.datadir  = temp_dir().display().to_string();
     config.rotation = 5;
     config.threshold = 250;
+    config.sample_interval = 1;
 
-    match args.config {
+     // Read config file if provided
+     match args.config {
         Some(conf_file) => {
             match parse_config(conf_file) {
                 Some(cfg) => config = cfg,
@@ -195,9 +197,9 @@ fn main() {
     thread::spawn(move || {
         for sig in signals.forever() {
             match sig {
-                SIGINT  => info!("Received SIGINT"),
-                SIGABRT => info!("Received SIGABRT"),
-                _       => info!("Received signal {:?}", sig),
+                SIGINT  => debug!("Received SIGINT"),
+                SIGABRT => debug!("Received SIGABRT"),
+                _       => debug!("Received signal {:?}", sig),
             }
             STOP.call_once(|| {});
         }
@@ -310,7 +312,7 @@ fn main() {
             }
         }
     }
-    info!("All flow processors have stopped");
+    debug!("All flow processors have stopped");
 
     // At this point all channels between collector(s) and
     // processor(s) have closed. Collector(s) will stop
@@ -340,7 +342,7 @@ fn main() {
             }
         }
     }
-    info!("All flow collectors have stopped");
+    debug!("All flow collectors have stopped");
 
 
     // finally drop last reference to flowwriter channel
@@ -352,7 +354,7 @@ fn main() {
             error!("{:#?}", err);
         }
     }
-    info!("Flow writer has stopped");
+    debug!("Flow writer has stopped");
 
     // We can now exit cleanly
     info!("Exiting nf2pq");

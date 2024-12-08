@@ -1,7 +1,11 @@
 use std::{collections::{BTreeMap, HashMap}, fmt::Debug, net::IpAddr};
 use crossbeam::channel::{self};
-use tracing::{debug, info};
-use netflow_parser::{variable_versions::{data_number::{DataNumber, FieldValue}, ipfix::IPFix, ipfix_lookup::IPFixField, v9::V9, v9_lookup::V9Field}, NetflowPacket, NetflowParser};
+use tracing::debug;
+use netflow_parser::{NetflowPacket, NetflowParser};
+use netflow_parser::variable_versions::data_number::{DataNumber, FieldValue};
+use netflow_parser::variable_versions::{ipfix::IPFix, ipfix_lookup::IPFixField};
+use netflow_parser::variable_versions::{v9::V9, v9_lookup::V9Field};
+
 use crate::flowstats::*;
 
 // Exchange of information between collector and processor
@@ -95,7 +99,7 @@ impl FlowProcessor {
                 }
             }
         }
-        info!("flowprocessor '{}' exiting gracefully ({} datagrams, {} flows received)", self.source_name, packets_received, flows_received);
+        debug!("flowprocessor '{}' exiting gracefully ({} datagrams, {} flows received)", self.source_name, packets_received, flows_received);
     }
 
     fn process_ipfix_packet(&mut self, ipfix:IPFix, exporter_ip: String) -> u64 {

@@ -1,6 +1,6 @@
 use std::net::UdpSocket;
 use crossbeam::channel;
-use tracing::{instrument, info, error};
+use tracing::{info, debug, error};
 
 use crate::flowprocessor::*;
 
@@ -18,7 +18,6 @@ pub struct FlowCollector {
  }
 
 impl FlowCollector {
-    #[instrument]
     pub fn new(
         source_name: String, 
         port: u16,
@@ -44,7 +43,6 @@ impl FlowCollector {
         Ok(fc)
     }
 
-    // #[instrument]
     pub fn start(&mut self) {
 
         info!("Started listening for netflow from '{}' on port {}", self.source_name, self.port);
@@ -72,7 +70,7 @@ impl FlowCollector {
                 }
             }
         }
-        info!("flowcollector '{}' exiting gracefully ({} datagrams received)", self.source_name, packets_received);
+        debug!("flowcollector '{}' exiting gracefully ({} datagrams received)", self.source_name, packets_received);
 
     }
 
